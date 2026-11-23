@@ -53,6 +53,7 @@ def check_run_access(db, row, user):
     from .semantic_models import SemanticRelease
     from .pipeline_catalog import guard_asset
     from .db import Asset
+    snapshot_cache={}
     for req in row.payload.get("requirements", []):
         if req.get("bundle"):
             check_bundle_access(db, row.workspace_id, user, req["bundle"])
@@ -62,7 +63,7 @@ def check_run_access(db, row, user):
             release=db.get(SemanticRelease,discovery.get("release_id"))
             scope=release.scope if release else "local_validation"
             targets=[dataset_ref]+[{**dataset_ref,"field_id":field.get("field_id")} for field in table.get("fields",[]) if field.get("field_id")]
-            if any(not can_read_physical(db,row.workspace_id,user,target,scope) for target in targets):
+            if any(not can_read_physical(db,row.workspace_id,user,target,scope,snapshot_cache) for target in targets):
                 fail("BLOCKED_PERMISSION","历史目录候选的现时读取政策已失效",403)
         candidate=req.get("metadata_candidate") or {}
         candidate_ref=candidate.get("dataset_ref")
@@ -70,9 +71,9 @@ def check_run_access(db, row, user):
             release=db.get(SemanticRelease,candidate.get("release_id"))
             scope=release.scope if release else "local_validation"
             targets=[candidate_ref]+[{**candidate_ref,"field_id":field.get("field_id")} for field in
-                [candidate.get("metric_field"),candidate.get("time_field"),*candidate.get("dimension_fields",[]),
+                [candidate.get("metric_field"),candidate.get('denominator_field'),candidate.get("time_field"),*candidate.get("dimension_fields",[]),
                  *[item.get("field") for item in candidate.get("filters",[])]] if field and field.get("field_id")]
-            if any(not can_read_physical(db,row.workspace_id,user,target,scope) for target in targets):
+            if any(not can_read_physical(db,row.workspace_id,user,target,scope,snapshot_cache) for target in targets):
                 fail("BLOCKED_PERMISSION","临时口径所引用的目录字段当前不可读取",403)
         for source in req.get("result", {}).get("verified_sources", []):
             asset = db.get(Asset, source.get("asset_id"))
@@ -82,11 +83,11 @@ def check_run_access(db, row, user):
         provenance=req.get("result",{}).get("provenance") or {}
         for source in provenance.get("tables",[]):
             dataset_ref=source.get("dataset_ref")
-            if dataset_ref and not can_read_physical(db,row.workspace_id,user,dataset_ref,"local_validation"):
+            if dataset_ref and not can_read_physical(db,row.workspace_id,user,dataset_ref,"local_validation",snapshot_cache):
                 fail("BLOCKED_PERMISSION","历史结果目录来源的现时读取政策已失效",403)
             for field in source.get("fields",[]):
                 field_ref=field.get("field_ref")
-                if field_ref and not can_read_physical(db,row.workspace_id,user,field_ref,"local_validation"):
+                if field_ref and not can_read_physical(db,row.workspace_id,user,field_ref,"local_validation",snapshot_cache):
                     fail("BLOCKED_PERMISSION","历史结果字段来源的现时读取政策已失效",403)
         semantic_refs=[item.get("asset_ref") for item in provenance.get("semantic_assets",[])]
         semantic_refs += [item.get("evidence_ref") or item.get("claim_ref") for item in provenance.get("evidence",[])]
@@ -102,6 +103,8 @@ def _actions(req, user):
         "GATE_PASSED": ["authorize"], "AUTHORIZED": ["execute"]}.get(state, [])
     if user.role != "admin":
         actions = [a for a in actions if a not in {"gate", "authorize", "execute"}]
+    if state in {"BLOCKED_EVIDENCE", "NEED_CLARIFICATION", "TARGET_CONFIRMATION"} or (state == 'MODEL_FAILED' and req.get('metadata_route')):
+        actions = actions + ["retry-retrieval"]
     if state in {"NEED_CLARIFICATION", "TARGET_CONFIRMATION"}:
         actions = actions + ["time-periods"]
     if state not in TERMINAL and state != "EXECUTION_UNKNOWN":
@@ -119,6 +122,9 @@ def view(row, user):
             proposed = copy.deepcopy(req['intent_frame'])
             req['clarifications'] = prepare_periods(proposed, req.get('clarifications', []))
             req['suggested_time_periods'] = proposed.get('time_periods', [])
+        req['clarifications'] = [c for c in req.get('clarifications', []) if c.get('slot') != 'timezone']
+        if req['state'] == 'NEED_CLARIFICATION' and not req['clarifications']:
+            req['state'] = 'TARGET_CONFIRMATION'
         req["allowed_actions"] = _actions(req, user)
     data["allowed_actions"] = [] if row.state in TERMINAL else ["cancel"]
     data["last_event_id"] = row.payload.get("event_seq", 0)
@@ -191,6 +197,9 @@ def _requirement(row, payload, rid, body):
         fail("REQUIREMENT_UNAVAILABLE", "需求项不存在", 404)
     if body.get("expected_requirement_version") != req["requirement_version"]:
         fail("REQUIREMENT_VERSION_CONFLICT", "需求项已更新，请刷新后重试")
+    req['clarifications'] = [c for c in req.get('clarifications', []) if c.get('slot') != 'timezone']
+    if req['state'] == 'NEED_CLARIFICATION' and not req['clarifications']:
+        req['state'] = 'TARGET_CONFIRMATION'
     return req
 
 
@@ -304,15 +313,30 @@ def _selection_ref_match(body, key, expected):
         fail("CONFIRMATION_STALE", "确认对象已变化，请重新检查当前内容")
 
 
+def refresh_run_model_selection(payload):
+    """A restart may renew the directory without changing the user's model choice."""
+    selection=payload.get('model_selection') or {}
+    if not selection.get('catalog_version'):
+        return
+    from .model_runtime import list_models
+    catalog=list_models()
+    chosen=next((m for m in catalog['models'] if selection.get('model') in {m.get('id'),m.get('model')}),None)
+    if not chosen:
+        fail('MODEL_NOT_AVAILABLE','原运行选择的模型已不可用，请选择当前模型新建问数',422)
+    efforts=[e.get('reasoningEffort') if isinstance(e,dict) else e for e in chosen.get('supportedReasoningEfforts',[])]
+    tiers=[t.get('id') if isinstance(t,dict) else t for t in chosen.get('serviceTiers',[])]
+    if selection.get('reasoningEffort') not in efforts or (selection.get('serviceTier') and selection['serviceTier'] not in tiers):
+        fail('MODEL_SELECTION_UNAVAILABLE','原运行的推理配置已不可用，请重新选择模型新建问数',422)
+    payload['model_selection']={**selection,'catalog_version':catalog['catalog_version']}
+
+
 def _retrieve(db, row, payload, req, user):
-    from .agent_clarification import check_analysis_support
-    check_analysis_support(req["intent_frame"])
     from .semantic import retrieve, metadata_candidates_for_bundle
     req["intent_frame_hash"] = canonical_hash(req["intent_frame"])
     bundle = retrieve(db, row.workspace_id, user, row.id, req["id"], req["intent_frame"], payload["pinned_deployment"],
         request_id=payload["request_id"], trace_id=payload["trace_id"])
     req["bundle"] = bundle; req["bundle_content_hash"] = canonical_hash(bundle)
-    discovery=metadata_candidates_for_bundle(db,row.workspace_id,user,bundle)
+    discovery=metadata_candidates_for_bundle(db,row.workspace_id,user,bundle,max_tables=50,max_fields=80,allow_selected=True)
     req["metadata_discovery"]=discovery
     candidate=req.get("metadata_candidate")
     candidate_valid=bool(candidate and discovery and candidate.get("intent_frame_hash")==req.get("intent_frame_hash")
@@ -320,7 +344,8 @@ def _retrieve(db, row, payload, req, user):
         and candidate.get("release_hash")==bundle.get("release_hash")
         and candidate.get("index_snapshot_hash")==bundle.get("index_snapshot_hash")
         and candidate.get("content_hash")==canonical_hash({k:v for k,v in candidate.items() if k!="content_hash"})
-        and not bundle.get("selected_metric_ref") and bundle.get("next_action")=="NEED_CLARIFICATION")
+        and bundle.get("next_action")!="BLOCKED_PERMISSION"
+        and not any(c.get('status') == 'CONFLICT' for c in bundle.get('coverage', [])))
     if candidate_valid:
         start=candidate["time_range"]["start"];end=candidate["time_range"]["end_exclusive"]
         dims=candidate.get("dimension_fields",[])
@@ -331,11 +356,22 @@ def _retrieve(db, row, payload, req, user):
             "logical_expression":candidate["definition"],"physical_expression":candidate["operation"]+
                 ("（"+candidate["metric_field"]["name_zh"]+"）" if candidate.get("metric_field") else "（表记录数）"),
             "physical_source":candidate["physical_source"],"time_field":candidate["time_field"],
-            "notice":"未命中已发布业务指标。本次口径由固定目录元数据形成，仅用于本地技术验证；不会自动写入或发布语义资产。"}
+            "time_periods":candidate.get("time_periods",[]),"data_availability":req.get("data_availability"),
+            "notice":("现有语义路径不能直接完成本次计算。" if bundle.get('selected_metric_ref') else "未命中已发布业务指标。")+"本次口径由固定目录元数据形成，仅用于本地技术验证；不会自动写入或发布语义资产。"}
         req.update(metric_card=metric_card,metric_card_hash=canonical_hash(metric_card),state="NEED_CONFIRMATION",
             error=None,clarifications=[],effective_next_action="NEED_CONFIRMATION")
         event(db,row,payload,"metadata_candidate.confirmation.required",req["id"],
             {"candidate_id":candidate["candidate_id"],"candidate_hash":candidate["content_hash"],"bundle_id":bundle["bundle_id"]})
+        return
+    from .agent_time import is_comparison
+    conflicts = any(c.get('status') == 'CONFLICT' for c in bundle.get('coverage', []))
+    fallback = (not bundle.get('selected_metric_ref') or not bundle.get('selected_binding_ref')
+                or req['intent_frame'].get('unresolved_dimension_terms')
+                or (req['intent_frame'].get('dimension_terms') and not req['intent_frame'].get('dimension_ids'))
+                or is_comparison(req['intent_frame']) or bundle['next_action'] not in {'PREVIEW_ONLY','NEED_CONFIRMATION'})
+    if fallback and bundle['next_action'] != 'BLOCKED_PERMISSION' and not conflicts:
+        from .agent_metadata import queue_metadata
+        queue_metadata(db, row, payload, req, discovery)
         return
     if bundle["next_action"] not in {"PREVIEW_ONLY", "NEED_CONFIRMATION"}:
         req["state"] = "NEED_CLARIFICATION" if bundle["next_action"] == "NEED_CLARIFICATION" else "BLOCKED_PERMISSION" if bundle["next_action"] == "BLOCKED_PERMISSION" else "BLOCKED_EVIDENCE"
@@ -387,7 +423,13 @@ def requirement_command(wid: int, run_id: str, rid: str, action: str, body: dict
         fail("ACTION_NOT_ALLOWED", "当前状态或身份不允许此操作", 403)
     if action != "cancel": check_run_access(db, row, user)
     try:
-        if action == "time-periods":
+        if action == "retry-retrieval":
+            req["error"] = None
+            req.pop("metadata_candidate", None)
+            req.pop("data_availability", None)
+            req.pop("data_gaps", None)
+            _retrieve(db, row, payload, req, user)
+        elif action == "time-periods":
             from .agent_time import confirm_periods
             try:
                 queued = confirm_periods(req, body.get('periods'))
@@ -469,6 +511,8 @@ def requirement_command(wid: int, run_id: str, rid: str, action: str, body: dict
             db.add(execution); auth["state"] = "CONSUMED"; req.update(execution_operation_id=execution.id, state="EXECUTING")
             db.add(AgentJob(id=new_id("job"), workspace_id=wid, run_id=run_id, requirement_id=rid, kind="EXECUTE", status="QUEUED"))
         elif action == "cancel":
+            if req['state'] == 'DRAFT':
+                _cancel_model_jobs(db, row.id, rid)
             if req["state"] == "EXECUTING":
                 req["state"] = "CANCEL_REQUESTED"
                 _cancel_execution(db, wid, req)
@@ -494,6 +538,7 @@ def cancel_run(wid: int, run_id: str, body: dict, request: Request, user=Depends
     payload = copy.deepcopy(row.payload)
     for req in payload.get("requirements", []):
         if req["state"] not in TERMINAL and req["state"] != "EXECUTION_UNKNOWN":
+            if req['state'] == 'DRAFT': _cancel_model_jobs(db, row.id, req['id'])
             if req["state"] == "EXECUTING": _cancel_execution(db, wid, req)
             req["state"] = "CANCEL_REQUESTED" if req["state"] in {"EXECUTING", "CANCEL_REQUESTED"} else "CANCELLED"
             req["requirement_version"] += 1
@@ -507,6 +552,18 @@ def cancel_run(wid: int, run_id: str, body: dict, request: Request, user=Depends
     event(db, row, payload, "cancellation.updated", detail={"requested": True})
     save_run(db, row, payload)
     return command_done(db, meta, envelope(wid, {"run": view(row, user)}))
+
+
+def _cancel_model_jobs(db, run_id, requirement_id):
+    from .model_runtime import cancel
+    jobs=db.scalars(select(AgentJob).where(AgentJob.run_id==run_id,
+        AgentJob.requirement_id==requirement_id,AgentJob.kind.in_(['CLARIFY','METADATA']),
+        AgentJob.status.in_(['QUEUED','RUNNING']))).all()
+    for job in jobs:
+        if job.status=='RUNNING':
+            try: cancel(job.id+':metadata' if job.kind=='METADATA' else job.id)
+            except Exception: pass
+        job.status='CANCELLED'
 
 
 def _cancel_execution(db, wid, req):

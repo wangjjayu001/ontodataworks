@@ -25,7 +25,7 @@ class ModelContractTests(unittest.TestCase):
         self.assertTrue(exc.exception.retryable)
 
     def test_candidate_request_and_response_share_the_same_schema_hash(self):
-        output = {"candidate_plan": None}
+        output = {"candidate_plan": None, "data_gaps": ["缺少费用字段"]}
         response = {"model_contract_version": MODEL_CONTRACT_VERSION,
             "output_schema_hash": canonical_hash(METADATA_CANDIDATE_SCHEMA), "output": output}
         with patch("app.model_runtime._bridge_call", return_value=response) as call:

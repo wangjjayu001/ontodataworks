@@ -18,6 +18,8 @@ from .agent_models import AgentJob, AgentRun, AgentExecution
 from .agent import event, save_run, _audit, check_run_access
 from .agent_planner import canonical_hash, new_id, PlanningBlocked, source_check, observe_measure_rows, verify_physical_grain, apply_result_policies
 
+from .agent_metadata import metadata_job
+
 log = logging.getLogger("agent-worker")
 
 
@@ -96,12 +98,15 @@ def pinned_model_vocabulary(db, wid, user, deployment):
 def normalize_intent(item, original):
     question = item.get("question") or original
     result = {"question": question, "metric_terms": item.get("metric_terms", []),
-        "dimension_terms": item.get("dimension_terms", []), "dimension_ids": [],
+        "dimension_terms": item.get("dimension_terms", []), "dimension_ids": [], "unresolved_dimension_terms": [],
         "start": item.get("start"), "end_exclusive": item.get("end_exclusive"),
-        "timezone": item.get("timezone"), "time_event": item.get("time_event"),
+        "timezone": "SOURCE", "time_event": item.get("time_event"),
         "filters": item.get("filters", []), "negative_terms": item.get("negative_terms", []),
         "analysis": copy.deepcopy(item.get("analysis") or {"kind": "NONE", "base_period": {"start": None, "end_exclusive": None}, "comparison_period": {"start": None, "end_exclusive": None}, "measures": []}),
         "depends_on_requirement_ids": [], "original_question": original}
+    from .agent_clarification import category_is_filter_only
+    if category_is_filter_only(result):
+        result['dimension_terms']=[term for term in result['dimension_terms'] if not re.search(r'类目|类别|品类|product_category',term,re.I)]
     terms = " ".join(map(str, result["dimension_terms"]))
     explicit_event = re.search(r"支付时间|付款时间|下单时间|订单创建时间|发货时间|评价时间|会话开始时间", question)
     if explicit_event:
@@ -118,7 +123,7 @@ def normalize_intent(item, original):
         elif re.search(r"类目|类别|品类|product_category", term) and not re.search(r"不按|不要|排除|不使用", term):
             result["dimension_ids"].append("product_category")
         else:
-            return result, [], {"code": "DIMENSION_ASSET_MISSING", "message": "请求的维度尚无已核验实现，不能忽略该维度后返回总计"}
+            result['unresolved_dimension_terms'].append(term)
     result["dimension_ids"] = list(dict.fromkeys(result["dimension_ids"]))
     if re.search(r"(?:不要|不按|别按|不使用).{0,8}(?:地区|地域|省|州|类目|类别)", question):
         return result, [], {"code": "NEGATIVE_DIMENSION_REVIEW", "message": "问题含排除维度约束，需要明确目标分组后再查询"}
@@ -127,13 +132,9 @@ def normalize_intent(item, original):
     clarifications = []
     if not result["start"] or not result["end_exclusive"]:
         clarifications.append({"id": new_id("clarify"), "slot": "time", "question": "请明确查询起止日期（结束日不含）", "options": []})
-    if re.search(r"源库时间|源时间|不做时区转换|SOURCE_TIMESTAMP", original, re.I):
-        result["timezone"] = "SOURCE"
-        result["negative_terms"] = [term for term in result["negative_terms"] if not ("时区" in term and not re.search(r"订单|支付|金额|地区|类别|过滤|排除记录", term))]
-    if result["timezone"] not in {"SOURCE", "source", "SOURCE_TIMESTAMP"}:
-        result["timezone"] = None
-        clarifications.append({"id": new_id("clarify"), "slot": "timezone", "question": "本地源库没有经过批准的时区定义，是否按源库原始时间查询且不做时区转换？", "options": [{"value": "SOURCE", "label": "使用源库时间（不转换）"}]})
-    if re.search(r"销售额", question) and not re.search(r"商品销售额|商品金额|含运费|订单总额", question):
+    # Calendar filters always use the source system's stored timestamps.
+    result["negative_terms"] = [term for term in result["negative_terms"] if not ("时区" in term and not re.search(r"订单|支付|金额|地区|类别|过滤|排除记录", term))]
+    if re.search(r"销售额", question) and not re.search(r'\broi\b|投资回报',' '.join(result['metric_terms']),re.I) and not re.search(r"商品销售额|商品金额|含运费|订单总额", question):
         clarifications.append({"id": new_id("clarify"), "slot": "metric", "question": "销售额是指含运费订单总额，还是不含运费商品金额？", "options": [{"value": "gross_order_value", "label": "订单总额（含运费）"}, {"value": "item_revenue", "label": "商品金额（不含运费）"}]})
     for c in item.get("clarifications", []):
         if c.get("slot") in {"timezone", "time", "metric"} or any(c.get("question") == x["question"] for x in clarifications): continue
@@ -156,7 +157,7 @@ def parse_job(job_id):
     from .model_runtime import parse_intent
     output = parse_intent(question, {"data_classification": "synthetic", "source_scope": "local_validation", "current_date": now().date().isoformat(),
         **vocabulary,
-        "warnings": ["买家状态与地区不同", "源库timestamp时区未知，不默默指定时区", "不允许生成SQL或编造资产ID"]}, selection, request_id=payload["request_id"],
+        "warnings": ["买家状态与地区不同", "所有日期按源系统存储时间筛选", "不允许生成SQL或编造资产ID"]}, selection, request_id=payload["request_id"],
         progress_callback=lambda phase: model_progress(job_id, phase))
     draft = output.get("output", output)
     if "requirements" not in draft and isinstance(draft.get("intent"), dict): draft = draft["intent"]
@@ -209,15 +210,18 @@ def clarification_job(job_id):
         user = db.get(User, row.actor_id)
         workspace_access(db, user, row.workspace_id); check_run_access(db, row, user)
         vocabulary = pinned_model_vocabulary(db, row.workspace_id, user, payload['pinned_deployment'])
-        metadata_discovery = copy.deepcopy(previous.get('metadata_discovery'))
         question = clarified_question(previous)
+    from .agent import refresh_run_model_selection
+    model_progress(job_id,'CONNECTING','clarification')
+    refresh_run_model_selection(payload)
+    selection=payload['model_selection']
     output = refine_intent(question, {'data_classification': 'synthetic', 'source_scope': 'local_validation',
         'confirmed_intent': confirmed_choices(previous),
         'current_date': now().date().isoformat(), **vocabulary,
         'warnings': ['只重新解析这一个需求项，保留原问题的筛选、分组和排除条件',
             '用户补充的答案是业务约束；已经明确回答的口径不要重复询问；不能推断用户未回答的选择',
             '同比或增长分析不能改写为两期合计，不允许生成SQL或资产ID']},
-        payload['model_selection'], request_id=job_id, progress_callback=lambda phase: model_progress(job_id, phase, 'clarification'))
+        selection, request_id=job_id, progress_callback=lambda phase: model_progress(job_id, phase, 'clarification'))
     error = None
     try:
         intent, clarifications, error = normalize_intent(output['output']['intent'], question)
@@ -225,30 +229,6 @@ def clarification_job(job_id):
     except PlanningBlocked as exc:
         intent, clarifications = previous['intent_frame'], []
         error = {'code': exc.code, 'message': exc.message}
-    metadata_candidate = None
-    candidate_call = None
-    candidate_question = None
-    if not error and not clarifications and metadata_discovery and not previous.get('bundle',{}).get('selected_metric_ref'):
-        from .model_runtime import derive_metadata_candidate
-        context = {'data_classification':'synthetic','source_scope':'local_validation',
-            'intent_frame':intent,'confirmed_intent':confirmed_choices(previous),
-            'metadata_candidates':metadata_model_context(metadata_discovery),
-            'warnings':['仅用固定发布中的可访问中文目录和字段释义；不得猜表、字段、关联、单位或SQL',
-                '查询候选只在本次本地技术验证使用，必须由用户确认，不得写入或发布语义资产']}
-        candidate_call = derive_metadata_candidate(question,context,payload['model_selection'],
-            request_id=job_id+':candidate',data_classification='synthetic',
-            progress_callback=lambda phase: model_progress(job_id, phase, 'metadata'))
-        plan=candidate_call.get('output',{}).get('candidate_plan')
-        if plan is not None:
-            try:
-                metadata_candidate=normalize_metadata_candidate(plan,metadata_discovery,intent,previous['bundle'],previous.get('answers',[]))
-            except PlanningBlocked as exc:
-                candidate_question=exc.message
-        else:
-            candidate_question='目录候选仍不能唯一支持这项计算。请明确统计对象、计算方式、时间字段、单位或具体分组字段。'
-        if not metadata_candidate and not clarifications:
-            clarifications=[{'id':new_id('clarify'),'slot':'semantic_definition',
-                'question':candidate_question or '目录候选仍不能唯一支持这项计算。请补充具体统计口径；单位或时间事件未确认时不会生成查询。','options':[]}]
     with SessionLocal() as db:
         job = db.get(AgentJob, job_id)
         row = db.scalar(select(AgentRun).where(AgentRun.id == job.run_id).with_for_update())
@@ -260,41 +240,41 @@ def clarification_job(job_id):
         user = db.get(User, row.actor_id)
         workspace_access(db, user, row.workspace_id); check_run_access(db, row, user)
         pinned_model_vocabulary(db, row.workspace_id, user, payload['pinned_deployment'])
+        payload['model_selection']=selection
         req.update(intent_frame=intent, intent_frame_hash=canonical_hash(intent), clarifications=clarifications,
             state='BLOCKED_EVIDENCE' if error else 'NEED_CLARIFICATION' if clarifications else 'TARGET_CONFIRMATION', error=error)
-        if metadata_candidate:
-            req['metadata_candidate']=metadata_candidate
-        else:
-            req.pop('metadata_candidate',None)
+        req.pop('metadata_candidate',None)
         req['clarification_requires_reparse'] = False
         req['clarification_model_call'] = {k: v for k, v in output.items() if k != 'output'}
         req['clarification_model_call']['real_inference'] = True
-        if candidate_call:
-            req['metadata_candidate_model_call']={k:v for k,v in candidate_call.items() if k!='output'}
-            req['metadata_candidate_model_call']['real_inference']=True
         req['requirement_version'] += 1
         req.setdefault('model_progress', {}).update(phase='COMPLETE', label='补充说明核对完成', updated_at=now().isoformat())
         event(db, row, payload, 'clarification.parsed', req['id'], {'state': req['state']})
         save_run(db, row, payload); job.status = 'DONE'; db.commit()
 
 
-def metadata_model_context(discovery, max_bytes=12000):
+def metadata_model_context(discovery, max_bytes=160000):
     """Bound the model input while keeping each field tied to its snapshot IDs."""
     context=copy.deepcopy(discovery or {})
     tables=[]
-    for table in context.get('tables',[])[:3]:
+    for table in context.get('tables',[])[:50]:
         item={k:table.get(k) for k in ('catalog_snapshot_id','datasource_id','dataset_id','table_label',
             'table_definition','logical_locator','schema_fingerprint','match_status','key_constraints')}
         item['fields']=[]
-        for field in table.get('fields',[])[:10]:
+        for field in table.get('fields',[])[:80]:
             item['fields'].append({k:field.get(k) for k in ('field_id','name','name_zh','definition','aliases',
                 'data_type','nullable','semantic_role','unit','legacy_unit_text','classification','is_primary')})
         tables.append(item)
     compact={k:context.get(k) for k in ('schema_version','release_id','release_hash','index_snapshot_id','index_snapshot_hash','content_hash','match_status','notice')}
     compact['tables']=tables
+    compact['directory_table_count']=len(context.get('tables',[]))
+    compact['directory_field_count']=sum(len(t.get('fields',[])) for t in context.get('tables',[]))
     while len(json.dumps(compact,ensure_ascii=False,separators=(',',':')).encode('utf-8'))>max_bytes and any(table['fields'] for table in compact['tables']):
         largest=max(compact['tables'],key=lambda table:len(table['fields']))
         largest['fields'].pop()
+    compact['model_table_count']=sum(bool(t['fields']) for t in tables)
+    compact['model_field_count']=sum(len(t['fields']) for t in tables)
+    compact['truncated']=compact['model_field_count']!=compact['directory_field_count']
     return compact
 
 
@@ -383,7 +363,8 @@ def execution_job(job_id):
     if columns != frame["result_shape"]:
         raise PlanningBlocked("RESULT_SHAPE_MISMATCH", "结果列与已确认方案不一致")
     if frame.get("result_kind") == "COUNT" or frame["metric_id"] in {"order_count", "session_count", "shipment_count", "promotion_orders"}:
-        if any(r[-1] is None or int(r[-1]) != r[-1] or r[-1] < 0 for r in values):
+        metric_index=columns.index('metric_value')
+        if any(r[metric_index] is None or int(r[metric_index]) != r[metric_index] or r[metric_index] < 0 for r in values):
             raise PlanningBlocked("RESULT_INVARIANT_FAILED", "计数结果未通过整数与非负校验")
     if (frame.get("result_kind") == "SCORE" or frame["metric_id"] == "review_score") and any(r[-1] is not None and not 1 <= r[-1] <= 5 for r in values):
         raise PlanningBlocked("RESULT_INVARIANT_FAILED", "评分结果超出1至5范围")
@@ -429,19 +410,19 @@ def claim():
         # Expired jobs may have issued an external query. Never replay EXECUTE.
         expired = db.scalars(select(AgentJob).where(AgentJob.status == "RUNNING", AgentJob.lease_until < now()).with_for_update(skip_locked=True)).all()
         for job in expired:
-            if job.kind == "CLARIFY":
+            if job.kind in {"CLARIFY", "METADATA"}:
                 row = db.get(AgentRun, job.run_id)
                 req = next((r for r in row.payload.get('requirements', []) if r['id'] == job.requirement_id), None)
                 if row.payload.get('cancel_requested') or not req or req['state'] != 'DRAFT':
                     job.status = 'CANCELLED'; continue
-            if job.kind in {"PARSE", "CLARIFY"} and job.attempts < 2:
+            if job.kind in {"PARSE", "CLARIFY", "METADATA"} and job.attempts < 2:
                 job.status = "QUEUED"
             else:
                 job.status = "UNKNOWN"; job.error = "租约过期，需先对账，禁止自动重跑"
                 row = db.get(AgentRun, job.run_id); payload = copy.deepcopy(row.payload)
                 req = next((r for r in payload.get("requirements", []) if r["id"] == job.requirement_id), None)
                 if req:
-                    req["state"] = "MODEL_FAILED" if job.kind == "CLARIFY" else "EXECUTION_UNKNOWN"
+                    req["state"] = "MODEL_FAILED" if job.kind in {"CLARIFY", "METADATA"} else "EXECUTION_UNKNOWN"
                     req["error"] = {"code": req["state"], "message": job.error}; req["requirement_version"] += 1
                     if req.get("execution_operation_id"):
                         execution = db.get(AgentExecution, req["execution_operation_id"]); execution.status = "UNKNOWN"
@@ -459,7 +440,7 @@ def record_failure(job_id, exc):
     with SessionLocal() as db:
         job = db.get(AgentJob, job_id); row = db.scalar(select(AgentRun).where(AgentRun.id == job.run_id).with_for_update())
         payload = copy.deepcopy(row.payload)
-        is_model = job.kind in {"PARSE", "CLARIFY"}
+        is_model = job.kind in {"PARSE", "CLARIFY", "METADATA"}
         code = getattr(exc, "code", "MODEL_SERVICE_FAILED" if is_model else "EXECUTION_FAILED")
         message = getattr(exc, "message", "模型解析失败，请检查模型服务后重试" if is_model else "查询失败，请检查本次操作状态；不会自动重跑")
         if isinstance(exc,HTTPException):
@@ -468,7 +449,7 @@ def record_failure(job_id, exc):
         job.status = "FAILED"; job.error = str(code)
         req = next((r for r in payload.get("requirements", []) if r["id"] == job.requirement_id), None)
         if req:
-            if job.kind == "CLARIFY":
+            if job.kind in {"CLARIFY", "METADATA"}:
                 if req['state'] == 'DRAFT' and not payload.get('cancel_requested'):
                     req.update(state='MODEL_FAILED', error={'code': code, 'message': message})
                     req.setdefault('model_progress', {}).update(phase='FAILED', label='识别未完成', updated_at=now().isoformat())
@@ -503,7 +484,7 @@ def main():
                 time.sleep(.5); continue
             with SessionLocal() as db: kind = db.get(AgentJob, job_id).kind
             try:
-                {"PARSE": parse_job, "CLARIFY": clarification_job, "EXECUTE": execution_job}[kind](job_id)
+                {"PARSE": parse_job, "CLARIFY": clarification_job, "METADATA": metadata_job, "EXECUTE": execution_job}[kind](job_id)
             except Exception as exc:
                 record_failure(job_id, exc)
         except Exception:

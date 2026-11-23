@@ -10,7 +10,7 @@ const esbuild=createRequire(require.resolve('vite'))('esbuild');
 const compiled=await esbuild.build({entryPoints:[fileURLToPath(new URL('../src/SmartQuery.jsx',import.meta.url))],bundle:true,platform:'node',format:'cjs',write:false,loader:{'.css':'empty'},external:['react','lucide-react'],logLevel:'silent'});
 const loaded={exports:{}};
 new Function('require','module','exports',compiled.outputFiles[0].text)(require,loaded,loaded.exports);
-const {ResultTable,IntentSummary,SemanticPath,MetadataDiscovery,TimePeriodEditor,QueryProgress}=loaded.exports;
+const {ResultTable,IntentSummary,SemanticPath,MetadataDiscovery,TimePeriodEditor,QueryProgress,DataAvailability}=loaded.exports;
 const render=result=>renderToStaticMarkup(React.createElement(ResultTable,{result}));
 
 test('comparison editor shows independent inclusive dates with a reversible base period',()=>{
@@ -79,17 +79,17 @@ test('result warnings show actual message and excluded-row count including zero'
 
 test('NO_DATA remains an empty result and is never turned into numeric zero',()=>{
  const html=render({columns:['metric_value'],rows:[],row_count:0,no_data:true,warnings:[]});
- assert.ok(html.includes('当前口径下没有有效数据'));assert.ok(html.includes('<tbody></tbody>'));assert.ok(!html.includes('<td>0</td>'));
+ assert.ok(html.includes('当前口径下没有有效数据'));assert.ok(html.includes('<tbody></tbody>'));assert.ok(!/<td[^>]*>0<\/td>/.test(html));
 });
 
 test('actual null, zero and false cells remain distinct with business column labels',()=>{
  const html=render({columns:['metric_value','nullable_value','flag'],column_metadata:[{name:'metric_value',label:'订单量'}],rows:[[0,null,false]],row_count:1,no_data:false});
- assert.ok(html.includes('>订单量</th>'));assert.ok(html.includes('<td>0</td>'));assert.ok(html.includes('<td>NULL</td>'));assert.ok(html.includes('<td>false</td>'));assert.ok(!html.includes('没有有效数据'));
+ assert.ok(html.includes('>订单量</th>'));assert.ok(/<td[^>]*>0<\/td>/.test(html));assert.ok(/<td[^>]*>NULL<\/td>/.test(html));assert.ok(/<td[^>]*>false<\/td>/.test(html));assert.ok(!html.includes('没有有效数据'));
 });
 
 test('primary intent is a business summary rather than protocol field names',()=>{
  const html=renderToStaticMarkup(React.createElement(IntentSummary,{intent:{metric_terms:['访问账户数'],start:'2025-01-01',end_exclusive:'2026-01-01',timezone:'SOURCE',time_event:'会话开始时间',dimension_terms:[],filters:[],negative_terms:[],depends_on_requirement_ids:[]}}));
- assert.ok(html.includes('关注指标'));assert.ok(html.includes('源库原始时间'));assert.ok(html.includes('访问账户数'));assert.ok(!html.includes('metric_terms'));assert.ok(!html.includes('depends_on_requirement_ids'));
+ assert.ok(html.includes('关注指标'));assert.ok(!html.includes('时区'));assert.ok(!html.includes('timezone'));assert.ok(html.includes('访问账户数'));assert.ok(!html.includes('metric_terms'));assert.ok(!html.includes('depends_on_requirement_ids'));
 });
 
 test('semantic path renders exact revision and real property-to-field mapping',()=>{
@@ -99,4 +99,14 @@ test('semantic path renders exact revision and real property-to-field mapping',(
  const context={assets:[entity,metric,binding].map(asset_revision=>({asset_ref:asset_revision,asset_revision})),snapshots:[{catalog_snapshot_id:'catalog-fixed',datasets:[{datasource_id:'7',dataset_id:'dwd.sessions',namespace:'dwd',physical_name:'dwd_sessions',logical_locator:'dwd.sessions',fields:[{field_id:'customer_id',name:'customer_key',business_definition:{name_zh:'账户标识'}},{field_id:'started_at',name:'start_time',business_definition:{name_zh:'会话开始时间'}}]}]}],status:'ready'},requirement={bundle:{selected_metric_ref:mr,selected_binding_ref:br,requested_dimension_refs:[],closure_refs:[{kind:'FIELD',target_ref:field('customer_id')}]}};
  const html=renderToStaticMarkup(React.createElement(SemanticPath,{requirement,context}));
  assert.ok(html.includes('访问账户数 · r2'));assert.ok(html.includes('访问账户映射 · r3'));assert.ok(html.includes('catalog-fixed'));assert.ok(html.includes('客户账户标识'));assert.ok(html.includes('dwd.dwd_sessions.customer_key'));assert.ok(html.includes('dwd.dwd_sessions.start_time'));assert.ok(!html.includes('暂不支持编辑的计算结构'));
+});
+
+ test('metadata gaps expose Chinese evidence and the inspected scope',()=>{
+ const html=renderToStaticMarkup(React.createElement(DataAvailability,{availability:{label:'缺少费用字段',checked_table_count:42,checked_field_count:282},gaps:['ROI 分母投放费用未找到']}));
+ for(const text of ['数据可用性核对','42','282','ROI 分母投放费用未找到','重新查找数据'])assert.ok(html.includes(text),text);
+ });
+
+test('comparison growth rates display percentages while preserving the raw value',()=>{
+ const html=render({columns:['period_label','metric_value','growth_rate'],rows:[['六月',1211,-0.044952681388012616]]});
+ assert.ok(html.includes('-4.50%'));assert.ok(html.includes('title="-0.044952681388012616"'));
 });

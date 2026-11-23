@@ -258,7 +258,7 @@ class ClarificationFlowTests(unittest.TestCase):
         self.db.expire_all();self.db.refresh(self.row)
         req=self.row.payload['requirements'][0]
         self.assertEqual(req['state'],'TARGET_CONFIRMATION')
-        self.assertEqual(req['metadata_candidate']['operation'],'COUNT_DISTINCT')
+        self.assertNotIn('metadata_candidate', req)
 
         with patch('app.agent.check_run_access'), \
              patch('app.semantic.retrieve',return_value=copy.deepcopy(bundle)), \
@@ -270,6 +270,18 @@ class ClarificationFlowTests(unittest.TestCase):
                 json=body,headers={'Idempotency-Key':'confirm-target-metadata'})
         self.assertEqual(response.status_code,200,response.text)
         self.db.refresh(self.row);req=self.row.payload['requirements'][0]
+        self.assertEqual(req['state'],'DRAFT')
+        metadata_id=self.db.scalar(select(AgentJob).where(AgentJob.kind=='METADATA')).id
+        from app.agent_metadata import metadata_job
+        with patch('app.agent_metadata.SessionLocal',sessionmaker(self.engine,expire_on_commit=False)), \
+             patch('app.agent_worker.SessionLocal',sessionmaker(self.engine,expire_on_commit=False)), \
+             patch('app.agent.check_run_access'), \
+             patch('app.model_runtime.derive_metadata_candidate',return_value=candidate_result), \
+             patch('app.agent_metadata.source_check',return_value={'read_only':True,'no_data':False,'measure_row_counts':{'source_rows':3,'valid_measure_rows':3}}), \
+             patch('app.semantic.retrieve',return_value=copy.deepcopy(bundle)), \
+             patch('app.semantic.metadata_candidates_for_bundle',return_value=discovery):
+            metadata_job(metadata_id)
+        self.db.expire_all();self.db.refresh(self.row);req=self.row.payload['requirements'][0]
         self.assertEqual(req['state'],'NEED_CONFIRMATION')
         self.assertTrue(req['metric_card']['candidate_only'])
         self.assertIn('未命中已发布业务指标',req['metric_card']['notice'])

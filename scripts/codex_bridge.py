@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.model_runtime import ModelRuntimeError, STAGE_SCHEMAS, canonical_hash, validate_output, MODEL_CONTRACT_VERSION, stage_schema_hashes
 from codex_cli_config import load_cli_configuration
 
-MAX_BODY = 32 * 1024
+MAX_BODY = 256 * 1024
 MAX_RESPONSE = 256 * 1024
 LOCAL = ROOT / "local"
 DISABLED_FEATURES = [
@@ -47,6 +47,7 @@ comparison_period even when direction needs confirmation. For example 25年5月�
 contains 2025-05-01 to 2025-06-01 and 2025-06-01 to 2025-07-01. Never leave both periods
 empty or replace them with one combined range. The user may confirm or reverse direction.
 You have no authority to approve semantics or execute SQL. Never invent numeric results.
+Never ask the user to configure or confirm a timezone. Calendar filters use stored source timestamps.
 For intent: preserve the user's language and negative constraints. Extract explicit metrics,
 dimensions, dates and filters. Split genuinely distinct requested metrics into requirements.
 Only input.question supplies business constraints. Context warnings are execution safeguards;
@@ -79,7 +80,12 @@ data.context.metadata_candidates. Copy the exact catalog_snapshot_id, datasource
 dataset_id of one supplied table. Return candidate_plan=null if the business meaning,
 time field, unit, or requested filter cannot be supported by that metadata. Use one
 dataset only; never invent a join, key, field, unit, or enum value. Supported operations
-are COUNT_ROWS (records at the table grain), COUNT_DISTINCT, SUM, and AVG. SUM/AVG
+are COUNT_ROWS (records at the table grain), COUNT_DISTINCT, SUM, AVG, and RATIO_SUM.
+RATIO_SUM means SUM(measure_field_id) / SUM(denominator_field_id), with NULL for zero denominator.
+Use it only for an explicitly clarified ratio of two compatible numeric fields on the same table.
+Set denominator_field_id=null for other operations. Always return data_gaps, listing specific
+missing fields or unsupported mappings when candidate_plan is null. Read data.context.caliber_answers
+for the user-confirmed formula. Never claim a missing field is present. SUM/AVG
 must target a numeric field with an explicit unit in the metadata or in a user's explicit
 clarification answer. Set null_policy to EXCLUDE_AND_WARN for SUM/AVG. Preserve every
 user-requested filter by mapping it to an exact field_id and equality value; if that

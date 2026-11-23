@@ -400,8 +400,8 @@ def verify_asset(db,wid,user,asset):
     if asset["asset_type"]=="metric":
         spec=asset["spec"]
         unit_ok=spec["unit"]["authority"]=="CONFIRMED" and spec["unit"]["kind"]!="UNKNOWN" and (spec["unit"]["kind"]!="CURRENCY" or bool(spec["unit"]["currency"]))
-        time_ok=bool(spec["time_policy"]["timezone"]) and spec["time_policy"]["kind"]!="UNKNOWN" and spec["time_policy"]["history_policy"]!="UNKNOWN"
-        checks += [("METRIC_UNIT","PASS" if unit_ok else "UNKNOWN","单位/币种必须有权威确认"),("METRIC_TIME","PASS" if time_ok else "UNKNOWN","时间事件/时区/历史策略必须明确")]
+        time_ok=spec["time_policy"]["kind"]!="UNKNOWN" and spec["time_policy"]["history_policy"]!="UNKNOWN"
+        checks += [("METRIC_UNIT","PASS" if unit_ok else "UNKNOWN","单位/币种必须有权威确认"),("METRIC_TIME","PASS" if time_ok else "UNKNOWN","时间事件与历史策略必须明确")]
     if asset["asset_type"]=="dimension":
         known=asset["spec"]["history_policy"]!="UNKNOWN" and asset["spec"]["null_member"]!="UNKNOWN"
         checks.append(("DIMENSION_SEMANTICS","PASS" if known else "UNKNOWN","历史归属和空成员规则必须明确"))
@@ -668,14 +668,14 @@ def hybrid_rank(query,documents):
     return sorted(scored,key=lambda s:(-s["rrf"],s["doc"]["document_id"]))
 
 
-def metadata_candidates_for_bundle(db,wid,user,bundle,*,max_tables=3,max_fields=24):
+def metadata_candidates_for_bundle(db,wid,user,bundle,*,max_tables=3,max_fields=24,allow_selected=False):
     """Return ACL-filtered, fixed-snapshot metadata for a no-metric discovery turn.
 
     Ranked table/field hits are suggestions only. If retrieval has no physical hit,
     a small unranked directory sample is returned for user-guided discovery; it is
     never selected as a metric or an execution binding by this function.
     """
-    if bundle.get("selected_metric_ref"):
+    if bundle.get("selected_metric_ref") and not allow_selected:
         return None
     release=db.get(SemanticRelease,bundle.get("release_id"))
     index=db.get(SemanticIndex,bundle.get("index_snapshot_id"))
@@ -701,7 +701,7 @@ def metadata_candidates_for_bundle(db,wid,user,bundle,*,max_tables=3,max_fields=
         if role=="field" and target.get("field_id"):
             field_ranks[(key,target["field_id"])]=min(field_ranks.get((key,target["field_id"]),999),item.get("fused_rank",999))
     unranked=not ranked_targets
-    if unranked:
+    if unranked or allow_selected:
         for doc in index.documents:
             target=doc.get("target_ref") or {}
             if doc.get("role")!="dataset" or set(target)!={"catalog_snapshot_id","datasource_id","dataset_id"}:
@@ -913,7 +913,7 @@ def retrieve(db,wid,user,run_id,requirement_id,intent,pinned_deployment=None,*,r
             if start and end and lower and upper and (str(start)[:10]<lower[:10] or str(end)[:10]>upper[:10]):
                 cover("time","MISSING","请求时间超出本地合成数据覆盖");next_action="BLOCKED_EVIDENCE"
             elif start and end:
-                cover("time","COMPLETE" if coverage_spec["start"] and coverage_spec["end_exclusive"] else "UNKNOWN","已明确请求事件范围；源timestamp时区/真实覆盖仍需执行前live source_check，不做时区转换")
+                cover("time","COMPLETE" if coverage_spec["start"] and coverage_spec["end_exclusive"] else "UNKNOWN","已明确请求事件范围；按源数据时间核对真实覆盖")
             else:
                 cover("time","UNKNOWN","需要明确时间范围");next_action="NEED_CLARIFICATION"
             cover("technical_verification","UNKNOWN","已完成类型、固定引用与归档来源核对；当前数据库结构、覆盖和JOIN须由执行前live source_check另行验证")

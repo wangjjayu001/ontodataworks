@@ -88,7 +88,7 @@ def prepare_periods(intent, clarifications):
     if not periods or (is_comparison(intent) and len(periods) < 2):
         return clarifications
     set_periods(intent, periods, confirmed=bool(intent.get('time_periods_confirmed')))
-    remaining = [c for c in clarifications if c['slot'] not in {'time', 'time_periods', 'comparison_direction'}]
+    remaining = [c for c in clarifications if c['slot'] not in {'time', 'time_periods', 'comparison_direction', 'analysis.direction', 'analysis.comparison_direction'}]
     if is_comparison(intent) and not intent.get('time_periods_confirmed'):
         remaining.insert(0, {'id': 'confirm-time-periods', 'slot': 'time_periods',
             'question': '已识别以下时间段，请确认或修改；第一个时间段为基期，可调整对比方向。', 'options': []})
@@ -102,7 +102,7 @@ def confirm_periods(req, periods):
     confirmed = req.setdefault('confirmed_intent', {})
     confirmed.update({key: copy.deepcopy(intent[key]) for key in
         ('time_periods', 'time_periods_confirmed', 'analysis', 'start', 'end_exclusive')})
-    req['clarifications'] = [c for c in req.get('clarifications', []) if c['slot'] not in {'time', 'time_periods', 'comparison_direction'}]
+    req['clarifications'] = [c for c in req.get('clarifications', []) if c['slot'] not in {'time', 'time_periods', 'comparison_direction', 'analysis.direction', 'analysis.comparison_direction'}]
     # Reuse answer auditing and invalidation, without scheduling another model call.
     placeholder = {'id': 'confirmed-time-periods', 'slot': 'time_periods', 'question': '确认时间段和对比方向'}
     req['clarifications'].append(placeholder)

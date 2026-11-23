@@ -23,7 +23,7 @@ test('all ten new asset types render dedicated maintenance controls with immutab
   assert.ok(html.includes('本次')||html.includes('业务')||html.includes('来源'),type);
   assert.ok(!/input[^>]+value="3"/.test(html),'workspace identity must stay read-only');
   assert.ok(!html.includes('value="binding:render-test"'),'asset identity must stay read-only');
-  if(type==='metric'){assert.ok(html.includes('统计实体'));assert.ok(html.includes('去重的业务标识'));assert.ok(!html.includes('运算节点'));}
+  if(type==='metric'){assert.ok(!html.includes('时区'));assert.ok(!html.includes('timezone'));assert.ok(html.includes('统计实体'));assert.ok(html.includes('去重的业务标识'));assert.ok(!html.includes('运算节点'));}
   if(type==='binding'){assert.ok(html.includes('物理映射维护步骤'));assert.ok(html.includes('选择口径'));assert.ok(html.includes('验证与依据'));assert.ok(!html.includes('需要运行的核验项目'));}
  }
 });

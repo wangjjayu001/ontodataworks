@@ -28,7 +28,7 @@ def _nullable(kind="string"):
     return {"type": [kind, "null"]}
 
 
-MODEL_CONTRACT_VERSION = "semantic-model/1.2"
+MODEL_CONTRACT_VERSION = "semantic-model/1.3"
 PERIOD_SCHEMA = {"type": "object", "additionalProperties": False,
     "required": ["start", "end_exclusive"],
     "properties": {"start": _nullable(), "end_exclusive": _nullable()}}
@@ -49,14 +49,14 @@ INTENT_SCHEMA = {
             "type": "array", "minItems": 1, "maxItems": 8,
             "items": {
                 "type": "object", "additionalProperties": False,
-                "required": ["question", "metric_terms", "dimension_terms", "start", "end_exclusive", "timezone", "time_event", "filters", "negative_terms", "clarifications", "depends_on_requirement_indexes", "analysis"],
+                "required": ["question", "metric_terms", "dimension_terms", "start", "end_exclusive", "time_event", "filters", "negative_terms", "clarifications", "depends_on_requirement_indexes", "analysis"],
                 "properties": {
                     "question": {"type": "string"},
                     "metric_terms": {"type": "array", "items": {"type": "string"}},
                     "dimension_terms": {"type": "array", "items": {"type": "string"}},
                     "start": {**_nullable(), "description": "For a whole-day question use YYYY-MM-DD only. Never append a midnight time. Preserve explicit hour/minute requests instead of rounding them."},
                     "end_exclusive": {**_nullable(), "description": "Exclusive end. Whole-day questions use YYYY-MM-DD only, with no T00:00:00 suffix."},
-                    "timezone": _nullable(), "time_event": _nullable(),
+                    "time_event": _nullable(),
                     "analysis": ANALYSIS_SCHEMA,
                     "negative_terms": {"type": "array", "description": "Only business exclusions explicitly requested in input.question. System/context warnings, parser rules, unknown approval or timezone are never user business exclusions. Use [] when the user asks for no exclusion.", "items": {"type": "string"}},
                     "depends_on_requirement_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 7}},
@@ -92,21 +92,21 @@ METADATA_FILTER_SCHEMA = {"type": "object", "additionalProperties": False,
         "operator": {"type": "string", "enum": ["="]}, "value": {"type": "string"}}}
 METADATA_CANDIDATE_PLAN_SCHEMA = {"type": ["object", "null"], "additionalProperties": False,
     "required": ["name", "definition", "catalog_snapshot_id", "datasource_id", "dataset_id",
-        "operation", "measure_field_id", "time_field_id", "dimension_field_ids", "filters",
+        "operation", "measure_field_id", "denominator_field_id", "time_field_id", "dimension_field_ids", "filters",
         "unit_label", "null_policy"],
     "properties": {
         "name": {"type": "string"}, "definition": {"type": "string"},
         "catalog_snapshot_id": {"type": "string"}, "datasource_id": {"type": "string"},
         "dataset_id": {"type": "string"},
-        "operation": {"type": "string", "enum": ["COUNT_ROWS", "COUNT_DISTINCT", "SUM", "AVG"]},
-        "measure_field_id": _nullable(), "time_field_id": _nullable(),
+        "operation": {"type": "string", "enum": ["COUNT_ROWS", "COUNT_DISTINCT", "SUM", "AVG", "RATIO_SUM"]},
+        "measure_field_id": _nullable(), "denominator_field_id": _nullable(), "time_field_id": _nullable(),
         "dimension_field_ids": {"type": "array", "maxItems": 2, "items": {"type": "string"}},
         "filters": {"type": "array", "maxItems": 5, "items": METADATA_FILTER_SCHEMA},
         "unit_label": {"type": "string"},
         "null_policy": {"type": "string", "enum": ["EXCLUDE_AND_WARN"]}}}
 METADATA_CANDIDATE_SCHEMA = {"type": "object", "additionalProperties": False,
-    "required": ["candidate_plan"],
-    "properties": {"candidate_plan": METADATA_CANDIDATE_PLAN_SCHEMA}}
+    "required": ["candidate_plan", "data_gaps"],
+    "properties": {"candidate_plan": METADATA_CANDIDATE_PLAN_SCHEMA, "data_gaps": {"type":"array", "maxItems":8, "items":{"type":"string"}}}}
 
 EXPLAIN_SCHEMA = {
     "type": "object", "additionalProperties": False,

@@ -7,6 +7,14 @@ from datetime import date
 from .agent_planner import PlanningBlocked
 
 
+def category_is_filter_only(intent):
+    question=intent.get('original_question') or intent.get('question') or ''
+    category=r'类目|类别|品类|product_category'
+    filtered=any(re.search(category,str(f.get('field','')),re.I) for f in intent.get('filters',[]))
+    grouped=re.search(r'(?:按|依照|依据).{0,10}(?:'+category+r')|(?:'+category+r').{0,6}(?:分组|分布|分别)',question,re.I)
+    return bool(filtered and not grouped)
+
+
 def clarified_question(req):
     original = req['intent_frame'].get('original_question') or req['question']
     answers = [{key: a[key] for key in ('slot', 'question', 'answer') if key in a}
@@ -145,7 +153,7 @@ def apply_answer(req, clarification, answer):
     for key in ('bundle', 'bundle_content_hash', 'metric_card', 'metric_card_hash',
                 'target_confirmation', 'metric_confirmation', 'query_frame', 'query_frame_ref',
                 'preview', 'sql_hash', 'gate', 'gate_result_ref', 'authorization',
-                'metadata_candidate','effective_next_action'):
+                'metadata_candidate','effective_next_action','data_availability','data_gaps'):
         req.pop(key, None)
     queued = not req['clarifications'] and req.get('clarification_requires_reparse', False)
     req['state'] = 'NEED_CLARIFICATION' if req['clarifications'] else 'DRAFT' if queued else 'TARGET_CONFIRMATION'
@@ -170,12 +178,14 @@ def merge_clarified_intent(previous, intent, clarifications):
     old_filters = previous['intent_frame'].get('filters', [])
     if any(f not in intent.get('filters', []) for f in old_filters):
         raise PlanningBlocked('CLARIFICATION_CONSTRAINT_LOST', '补充说明后的解析没有完整保留原筛选条件，未继续生成查询')
-    if set(previous['intent_frame'].get('dimension_ids', [])) - set(intent.get('dimension_ids', [])):
+    old_dimensions=set(previous['intent_frame'].get('dimension_ids', []))
+    if category_is_filter_only(previous['intent_frame']):old_dimensions.discard('product_category')
+    if old_dimensions - set(intent.get('dimension_ids', [])):
         raise PlanningBlocked('CLARIFICATION_CONSTRAINT_LOST', '补充说明后的解析没有完整保留原分组要求，未继续生成查询')
     intent['negative_terms'] = list(dict.fromkeys(previous['intent_frame'].get('negative_terms', []) + intent.get('negative_terms', [])))
-    resolved = set(confirmed)
+    resolved = set(confirmed) | {a.get("slot") for a in previous.get("answers", []) if a.get("slot")}
     if intent.get('time_periods_confirmed'):
-        resolved.update({'time', 'time_periods', 'comparison_direction'})
+        resolved.update({'time', 'time_periods', 'comparison_direction', 'analysis.direction', 'analysis.comparison_direction'})
     if 'start' in resolved and 'end_exclusive' in resolved:
         resolved.add('time')
     if 'metric_id' in resolved:
