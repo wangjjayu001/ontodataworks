@@ -1,0 +1,8 @@
+# Default maintainer; split these owners when module maintainers join.
+* @wangjjayu001
+/backend/app/semantic* @wangjjayu001
+/backend/app/contracts/ @wangjjayu001
+/backend/app/agent* @wangjjayu001
+/backend/app/pipeline* @wangjjayu001
+/infra/ @wangjjayu001
+/.github/ @wangjjayu001

@@ -6,6 +6,7 @@ stay on the client and never enter model or retrieval requests.
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime, timezone
 from decimal import Decimal,InvalidOperation
 import json
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from validate_v1_live import Api
 
-REFERENCE = Path("D:/agent语义取数文件夹/验证数据/高可用验证/ecommerce_validation.duckdb")
+REFERENCE = Path(os.environ.get('ONTODATAWORKS_TEST_DATA_ROOT', str(ROOT/'local/test-data'))) / 'ecommerce_validation.duckdb'
 CASES = [
     {"id":"session_count", "question":"2025年按会话开始时间统计访问会话数，按会话编号去重，返回总计，使用源库时间。",
      "start":"2025-01-01", "end_exclusive":"2026-01-01",

@@ -92,12 +92,12 @@ class ClarificationFlowTests(unittest.TestCase):
         intent.update(metric_terms=['商品金额'], timezone=None, negative_terms=[],
             clarifications=[{'slot': 'timezone', 'question': '重复时区', 'options': []},
                             {'slot': 'metric', 'question': '重复指标', 'options': []}])
-        return {'output': {'requirements': [intent], 'clarification_needed': False}, 'tool_events': []}
+        return {'output': {'intent': intent}, 'tool_events': []}
 
     def worker(self, job, output=None, side_effect=None):
         with patch('app.agent_worker.SessionLocal', sessionmaker(self.engine, expire_on_commit=False)), \
              patch('app.agent_worker.pinned_model_vocabulary', return_value={}), \
-             patch('app.model_runtime.parse_intent', return_value=output or self.parsed(), side_effect=side_effect) as model:
+             patch('app.model_runtime.refine_intent', return_value=output or self.parsed(), side_effect=side_effect) as model:
             clarification_job(job)
         self.db.expire_all()
         return model
@@ -112,13 +112,25 @@ class ClarificationFlowTests(unittest.TestCase):
         self.assertEqual(len(self.db.scalars(select(AgentRun)).all()), 1)
         self.assertFalse(self.db.scalars(select(AgentJob)).all())
 
-    def test_comparison_answers_stay_one_requirement_without_reparsing_both_as_new_metrics(self):
+    def test_comparison_answers_use_one_requirement_contract_and_preserve_periods(self):
         self.command('direction', '2024年为基期，比较2025年')
         data = self.command('growth', '两者都要')
         req = data['run']['requirements'][0]
-        self.assertEqual(req['state'], 'TARGET_CONFIRMATION')
+        self.assertEqual(req['state'], 'DRAFT')
         self.assertEqual(len(req['intent_frame']['clarification_answers']), 2)
-        self.assertFalse(self.db.scalars(select(AgentJob)).all())
+        jobs = self.db.scalars(select(AgentJob)).all()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].kind, 'CLARIFY')
+        self.worker(jobs[0].id)
+        requirements = self.db.get(AgentRun, 'run-test').payload['requirements']
+        self.assertEqual(len(requirements), 1)
+        self.assertEqual(requirements[0]['state'], 'TARGET_CONFIRMATION')
+        self.assertEqual(requirements[0]['id'], 'requirement-test')
+        self.assertEqual(requirements[0]['intent_frame']['analysis'], {
+            'kind': 'PERIOD_COMPARISON',
+            'base_period': {'start': '2024-01-01', 'end_exclusive': '2025-01-01'},
+            'comparison_period': {'start': '2025-01-01', 'end_exclusive': '2026-01-01'},
+            'measures': ['GROWTH_RATE', 'ABSOLUTE_CHANGE']})
 
     def test_final_answer_queues_only_reparse_and_keeps_cas(self):
         self.queue()
@@ -146,7 +158,7 @@ class ClarificationFlowTests(unittest.TestCase):
         self.assertFalse(req.get('preview'))
 
     def test_parse_cannot_drop_original_filter(self):
-        job = self.queue(); output = self.parsed(); output['output']['requirements'][0]['filters'] = []
+        job = self.queue(); output = self.parsed(); output['output']['intent']['filters'] = []
         self.worker(job, output)
         req = self.db.get(AgentRun, 'run-test').payload['requirements'][0]
         self.assertEqual(req['state'], 'BLOCKED_EVIDENCE')

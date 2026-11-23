@@ -1,0 +1,17 @@
+name: Feature / 功能建议
+description: 提出带场景、模块和验收条件的改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户场景与需要解决的问题
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 影响模块、建议边界与验收标准
+    validations:
+      required: true

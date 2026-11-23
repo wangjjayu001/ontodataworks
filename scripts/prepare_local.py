@@ -12,5 +12,7 @@ if not path.exists():
 values=json.loads(path.read_text(encoding="utf-8"))
 env=root/".env"
 if not env.exists():env.write_text("DATABASE_PASSWORD="+values["database_password"]+"\nENCRYPTION_KEY="+values["encryption_key"]+"\nINITIAL_ADMIN_PASSWORD="+values["admin_password"]+"\n",encoding="utf-8")
+token=local/"codex-bridge.token"
+if not token.exists():token.write_text(secrets.token_urlsafe(32),encoding="utf-8")
 (local/"本机登录信息.txt").write_text("独立数据工作台\n地址：http://127.0.0.1:19090\n账号：admin\n密码："+values["admin_password"]+"\n\n与 qData 的账号和数据库相互独立。\n",encoding="utf-8")
 print("Local independent configuration prepared; no secrets printed.")

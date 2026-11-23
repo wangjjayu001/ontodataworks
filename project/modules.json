@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "platform",
+      "title": "平台内核与身份权限",
+      "summary": "负责会话、工作空间、成员、审计及共享 API 装配；其他模块使用真实身份和空间边界。",
+      "paths": ["backend/app/main.py", "backend/app/db.py", "backend/app/security.py", "backend/app/observability.py", "frontend/src/main.jsx", "frontend/src/navigation.js", "frontend/src/styles.css", "frontend/public/*"],
+      "tests": ["scripts/test_execution_policies.py"],
+      "contracts": "公开 API、cookie/CSRF、workspace/actor、共享模型变化需标注所有受影响模块。"
+    },
+    {
+      "id": "catalog",
+      "title": "数据源、目录与血缘",
+      "summary": "负责连接、元数据采集、物理结构指纹、中文释义和来源；与语义权威分开。",
+      "paths": ["backend/app/warehouse.py", "backend/app/pipeline_catalog.py", "backend/app/main.py", "backend/app/db.py", "frontend/src/main.jsx"],
+      "tests": ["scripts/validate_drift_and_readonly.py", "scripts/validate_chinese_metadata.py"],
+      "contracts": "CatalogSnapshot / FieldRef、来源证据及物理指纹由本模块提供；变更需联合 semantic 评审。"
+    },
+    {
+      "id": "modeling",
+      "title": "数仓建模与物理发布",
+      "summary": "负责业务域、逻辑模型与修订、分层 DDL 预检、发布计划和实际结构回读。",
+      "paths": ["backend/app/main.py", "backend/app/warehouse.py", "backend/app/pipeline_publication.py", "frontend/src/ModelPublishing.jsx", "frontend/src/main.jsx"],
+      "tests": ["scripts/validate_v11_consolidation.py"],
+      "contracts": "设计 published、DDL 执行和语义 Release 不共用成功状态；结构变化须联动 catalog。"
+    },
+    {
+      "id": "pipeline",
+      "title": "数据工程、调度与质量",
+      "summary": "负责采集/同步/SQL/质量任务、持久运行、提交回执、批次、Outbox、异常及独立复核。",
+      "paths": ["backend/app/pipeline*.py", "frontend/src/Pipeline*.jsx", "frontend/src/pipeline.css"],
+      "tests": ["scripts/test_pipeline_governance.py", "scripts/test_pipeline_issues.py", "scripts/validate_v11_*.py"],
+      "contracts": "DefinitionRevision / Run / Attempt / DataBatch 与跨库 UNKNOWN 对账；写入和质量行为变化需真实 PostgreSQL 验收。"
+    },
+    {
+      "id": "semantic",
+      "title": "本体语义资产、治理与召回",
+      "summary": "负责十类语义资产、不可变修订、来源证据、核验审核、Release/Index/Deployment、召回和 Binding 编译。",
+      "paths": ["backend/app/semantic*.py", "backend/app/contracts/**", "frontend/src/Semantic*.jsx", "frontend/src/semantic*", "frontend/src/SourceArchive.jsx", "frontend/src/sourceArchive.js"],
+      "tests": ["scripts/test_semantic*.py", "scripts/test_typed*.py", "frontend/tests/semantic*.mjs", "frontend/tests/source-archive.test.mjs", "frontend/tests/deployment-scope.test.mjs"],
+      "contracts": "AssetRevision + CatalogSnapshot 是执行权威；修改 Schema、编译或召回必须同步 agent 契约与黄金回归。"
+    },
+    {
+      "id": "agent",
+      "title": "问数 Agent 与模型运行",
+      "summary": "负责对话、逐需求项状态、澄清、固定语义引用、确定性规划、Gate、单次授权、取消和模型桥接。",
+      "paths": ["backend/app/agent*.py", "backend/app/model_runtime.py", "frontend/src/SmartQuery.jsx", "frontend/src/smart-query.css", "frontend/src/CodexModelPicker.jsx", "frontend/src/codex-models.json", "frontend/src/query*.js", "scripts/codex_bridge.py", "scripts/*CodexBridge.ps1", "scripts/CODEX-RUNTIME.md"],
+      "tests": ["scripts/test_agent*.py", "scripts/test_model_vocabulary.py", "frontend/tests/query*.mjs", "scripts/validate_agent_transport_live.py", "scripts/validate_model_runtime.py"],
+      "contracts": "模型目录/结构化意图、Run/Requirement/QueryFrame/CAS；意图和工具变化不得扩大当前本地公开/合成验证范围。"
+    },
+    {
+      "id": "consumption",
+      "title": "查询、分析、导出与数据服务",
+      "summary": "负责共享只读查询、保存分析、图表、文件导出、参数化服务契约及消费者权限。",
+      "paths": ["backend/app/warehouse.py", "backend/app/pipeline_query.py", "backend/app/pipeline_export.py", "backend/app/pipeline_extensions.py", "backend/app/pipeline.py", "frontend/src/PipelineV11.jsx", "frontend/src/main.jsx"],
+      "tests": ["scripts/test_execution_policies.py", "frontend/tests/query-result-render.test.mjs", "scripts/validate_v11_policy_sql.py"],
+      "contracts": "SQL 参数、结果列、服务 revision、访问政策和调用预算；下载与历史结果重新鉴权。"
+    },
+    {
+      "id": "infrastructure",
+      "title": "部署、迁移、测试与发布工程",
+      "summary": "负责 Compose、镜像、初始化、迁移、备份恢复、依赖、测试入口和 GitHub 工程配置。",
+      "paths": ["compose.yml", "Manage-Workbench.ps1", "*-workbench.cmd", "Import-Ecommerce.ps1", ".env.example", "backend/Dockerfile", "backend/requirements.txt", "backend/app/bootstrap.py", "backend/app/migrate_*.py", "frontend/package.json", "frontend/pnpm*", "frontend/vite.config.js", "frontend/index.html", "infra/**", ".github/**", "project/**", "requirements-dev.txt", ".gitignore", ".gitattributes", ".editorconfig", ".node-version", ".python-version", "scripts/prepare_local.py", "scripts/runtime.py", "scripts/run_tests.py", "scripts/check_repository.py", "scripts/sync_modules.py", "scripts/collect_provenance.py", "scripts/finalize*.py", "scripts/import_ecommerce.py", "scripts/maintain_chinese_metadata.py", "scripts/seed_semantic_local.py", "scripts/rebuild_semantic_repaired_live.py", "scripts/validate*.py", "scripts/retrieval-live-cases.v1.json"],
+      "tests": ["scripts/check_repository.py", "scripts/run_tests.py"],
+      "contracts": "Schema 迁移顺序、持久卷、镜像 digest、启动参数和 CI 均属部署契约；变更须更新 README。"
+    }
+  ]
+}

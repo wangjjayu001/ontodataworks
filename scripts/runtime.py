@@ -1,8 +1,10 @@
 from pathlib import Path
-import json,subprocess,urllib.request,urllib.error,http.cookiejar
+import json,subprocess,urllib.request,urllib.error,http.cookiejar,os,shutil
 
 ROOT=Path(__file__).resolve().parent.parent
-CLI=ROOT.parent/"runtime/DockerDesktop/resources/bin/docker.exe"
+CLI=os.environ.get("ONTODATAWORKS_DOCKER") or shutil.which("docker")
+if not CLI:
+    raise RuntimeError("Docker CLI not found; add it to PATH or set ONTODATAWORKS_DOCKER")
 ARGS=[str(CLI),"compose","--project-directory",str(ROOT),"--env-file",str(ROOT/".env"),"-f",str(ROOT/"compose.yml")]
 
 

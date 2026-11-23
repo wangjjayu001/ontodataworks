@@ -1,0 +1,23 @@
+name: Bug / 故障
+description: 报告可以复现的功能或部署问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: 影响模块
+      options: [platform, catalog, modeling, pipeline, semantic, agent, consumption, infrastructure]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 版本、环境、复现步骤与期望/实际行为
+      description: 请提供提交号、部署方式和错误摘要；不要附密码、令牌或结果明细。
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: 已尝试的排查与相关日志摘要

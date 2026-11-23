@@ -1,3 +1,4 @@
+import os
 """Real HTTP/model/retrieval/execution acceptance against independent DuckDB.
 Credentials stay in ignored local files; reports contain no cookies or tokens.
 """
@@ -113,7 +114,7 @@ def main():
         completed=wait(run);assert completed["state"]=="DELIVERED",completed
         result=completed["requirements"][0]["result"]
         import duckdb
-        with duckdb.connect('D:/agent语义取数文件夹/验证数据/高可用验证/ecommerce_validation.duckdb',read_only=True) as reference:
+        with duckdb.connect(str(Path(os.environ.get('ONTODATAWORKS_TEST_DATA_ROOT', str(ROOT/'local/test-data'))) / 'ecommerce_validation.duckdb'),read_only=True) as reference:
             expected=[list(r) for r in reference.execute("SELECT c.state, count(DISTINCT b.order_id) FROM dwd.fct_orders b JOIN dim.customers c ON b.customer_id=c.customer_id WHERE b.purchased_at >= TIMESTAMP '2025-01-01' AND b.purchased_at < TIMESTAMP '2026-01-01' GROUP BY c.state ORDER BY c.state NULLS LAST").fetchall()]
         assert result["rows"]==expected,(result["rows"],expected)
         assert result["scope"]=="local_validation" and result["validation"]["business_approved"] is False

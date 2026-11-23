@@ -3,12 +3,12 @@ Run with the existing ecommerce dataset's Python venv (duckdb + sqlglot).
 Never edits the source snapshot. Existing databases without our state are refused.
 """
 from runtime import *
-import argparse, hashlib, secrets, re, time
+import argparse, hashlib, secrets, re, time, os
 from datetime import datetime, timezone
 import duckdb, sqlglot
 from sqlglot import exp
 
-SOURCE=Path(r'D:/agent语义取数文件夹/验证数据/高可用验证')
+SOURCE=Path(os.environ.get('ONTODATAWORKS_TEST_DATA_ROOT', str(ROOT/'local/test-data')))
 LOCAL=ROOT/'local/ecommerce_import'
 EVIDENCE=ROOT/'evidence/ecommerce'
 DATABASE='ecommerce_validation'

@@ -28,7 +28,8 @@ CODEX_BRIDGE_TOKEN_FILE=/run/secrets/codex_bridge_token
 
 - `list_models()`：实时 app-server `model/list`，跟随分页，返回 models、catalog_version、updated_at、cli_version 和运行范围。
 - `parse_intent(text, context, model_selection, request_id, data_classification='synthetic')`：真实结构化意图；返回 `output={requirements,clarification_needed}` 和真实模型/轮次/usage 回执。每个 requirement 包含 metric_terms、dimension_terms、start/end_exclusive、timezone、time_event、filters、negative_terms、clarifications、depends_on_requirement_indexes。
-- `invoke('intent'|'explain', input_payload, registered_schema, selection, request_id, data_classification)`：两个登记阶段，不开放任意 Schema/任意 RPC。
+- `refine_intent(text, context, model_selection, request_id)`：澄清只细化一个已有需求，返回 `output.intent`，不产生新的 requirements 数组。
+- `invoke('intent'|'clarification'|'explain', input_payload, registered_schema, selection, request_id, data_classification)`：三个登记阶段，不开放任意 Schema/任意 RPC。桥接与后端核对 `semantic-model/1.1` 和各阶段 Schema hash。
 - `cancel(request_id)`：登记模型取消；应用仍需等待真实 interrupted/failed/completed 终态并单独取消自己的查询/工具作业。
 
 目录选择只接受实际 model/list 中的模型、supportedReasoningEfforts 和 serviceTiers；目录 hash 过期需重选，不静默换模型。`outputSchema` 只约束最终助手消息，后端再次验证小型闭合 Schema，不把输出或文字“通过”视为业务核验。

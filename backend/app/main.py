@@ -45,7 +45,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Independent Data Workbench", version="1.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="OntoDataWorks", version="1.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.include_router(semantic_router)
 app.include_router(agent_router)
 app.include_router(pipeline_router)
