@@ -10,7 +10,7 @@ const esbuild=createRequire(require.resolve('vite'))('esbuild');
 const compiled=await esbuild.build({entryPoints:[fileURLToPath(new URL('../src/SmartQuery.jsx',import.meta.url))],bundle:true,platform:'node',format:'cjs',write:false,loader:{'.css':'empty'},external:['react','lucide-react'],logLevel:'silent'});
 const loaded={exports:{}};
 new Function('require','module','exports',compiled.outputFiles[0].text)(require,loaded,loaded.exports);
-const {ResultTable,IntentSummary,SemanticPath}=loaded.exports;
+const {ResultTable,IntentSummary,SemanticPath,MetadataDiscovery}=loaded.exports;
 const render=result=>renderToStaticMarkup(React.createElement(ResultTable,{result}));
 
 test('intent summary exposes accepted clarification answers beside the business constraints',()=>{
@@ -19,6 +19,37 @@ test('intent summary exposes accepted clarification answers beside the business 
  assert.ok(html.includes('2024年为基期，比较2025年'));
  assert.ok(html.includes('两者都要'));
  assert.ok(!html.includes('comparison_direction'));
+});
+
+test('metadata discovery shows fixed-snapshot Chinese fields without implying a confirmed metric',()=>{
+ const html=renderToStaticMarkup(React.createElement(MetadataDiscovery,{discovery:{match_status:'RETRIEVAL_CANDIDATE',tables:[{catalog_snapshot_id:'catalog-1',datasource_id:'3',dataset_id:'orders',table_label:'订单明细',logical_locator:'dwd.orders',schema_fingerprint:'abc',fields:[{field_id:'order_id',name:'order_id',name_zh:'订单编号',definition:'订单唯一标识',data_type:'text',semantic_role:'IDENTIFIER',is_primary:true}]}]}}));
+ assert.ok(html.includes('检索候选'));
+ assert.ok(html.includes('订单明细'));
+ assert.ok(html.includes('订单编号'));
+ assert.ok(html.includes('主键'));
+});
+
+test('result validation and data lineage render Chinese check details and source evidence',()=>{
+ const html=render({columns:['metric_value'],rows:[[3]],row_count:1,data_as_of:'2025-12-31',
+  validation:{status:'PASS',status_label:'技术校验通过',business_approved:false,check_items:[
+   {code:'RESULT_SHAPE',label:'结果列结构',status:'PASS',detail:'结果列与方案一致'},
+   {code:'TEMPORARY_CALIBER',label:'临时口径状态',status:'NOT_APPROVED',detail:'仅本次本地验证'}
+  ]},
+  provenance:{tables:[{asset_id:7,table_label:'订单明细',physical_object:'dwd.orders',datasource_name:'电商验证库',
+   schema_fingerprint:'fingerprint',verified:true,catalog_snapshot:{catalog_snapshot_id:'catalog-1'},data_batch:{batch:'batch-3'},
+   fields:[{field_id:'order_id',name_zh:'订单编号',physical_name:'order_id',definition:'订单唯一标识',data_type:'text',semantic_role:'IDENTIFIER',classification:'INTERNAL'}]}],
+   temporary_candidate:{name:'按订单编号计数'},evidence:[{name:'已支付口径',source_name:'业务规则文档',assertion:'仅计算已支付订单',excerpt:'已支付订单定义',source_revision:'r2',locator:{pointer:'/rules/1'}}],
+   verification_receipts:[{verification_id:'verify-1',rule_id:'BUSINESS_PROVENANCE',outcome:'PASS',reason:'来源可回查'}]}
+ });
+ assert.ok(html.includes('结果校验'));
+ assert.ok(html.includes('业务口径尚未审批'));
+ assert.ok(html.includes('订单明细'));
+ assert.ok(html.includes('本次使用字段'));
+ assert.ok(html.includes('订单唯一标识'));
+ assert.ok(html.includes('已支付口径'));
+ assert.ok(html.includes('已支付订单定义'));
+ assert.ok(html.includes('来源原文与业务主张'));
+ assert.ok(html.includes('机器核验回执'));
 });
 
 test('result warnings show actual message and excluded-row count including zero',()=>{

@@ -10,6 +10,7 @@ PR scope：`agent`；GitHub 标签：`module:agent`。
 
 - `backend/app/agent*.py`
 - `backend/app/model_runtime.py`
+- `backend/app/query_provenance.py`
 - `frontend/src/SmartQuery.jsx`
 - `frontend/src/smart-query.css`
 - `frontend/src/CodexModelPicker.jsx`
@@ -22,6 +23,8 @@ PR scope：`agent`；GitHub 标签：`module:agent`。
 ## 现有验证入口
 
 - `scripts/test_agent*.py`
+- `scripts/test_metadata_candidate_flow.py`
+- `scripts/test_model_contract.py`
 - `scripts/test_model_vocabulary.py`
 - `frontend/tests/query*.mjs`
 - `scripts/validate_agent_transport_live.py`

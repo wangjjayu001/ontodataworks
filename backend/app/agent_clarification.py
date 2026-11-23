@@ -112,6 +112,10 @@ def apply_answer(req, clarification, answer):
         if options and answer not in options:
             fail('CLARIFICATION_VALUE_INVALID', '请选择当前澄清项提供的时间事件', 422)
         confirmed.update(time_event=answer, requested_time_event=answer)
+    elif slot in {'comparison_direction', 'growth_measure'}:
+        # These two slots have a closed, validated representation below. They
+        # must remain in one requirement and do not need another model parse.
+        pass
     else:
         # Model-proposed semantic slots are not arbitrary intent dictionary keys.
         # Reparse the original question plus the complete answer history instead.
@@ -132,7 +136,8 @@ def apply_answer(req, clarification, answer):
     # A revised intent invalidates any earlier retrieved or approved artifact.
     for key in ('bundle', 'bundle_content_hash', 'metric_card', 'metric_card_hash',
                 'target_confirmation', 'metric_confirmation', 'query_frame', 'query_frame_ref',
-                'preview', 'sql_hash', 'gate', 'gate_result_ref', 'authorization'):
+                'preview', 'sql_hash', 'gate', 'gate_result_ref', 'authorization',
+                'metadata_candidate','effective_next_action'):
         req.pop(key, None)
     queued = not req['clarifications'] and req.get('clarification_requires_reparse', False)
     req['state'] = 'NEED_CLARIFICATION' if req['clarifications'] else 'DRAFT' if queued else 'TARGET_CONFIRMATION'

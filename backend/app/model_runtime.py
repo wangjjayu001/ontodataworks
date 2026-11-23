@@ -26,7 +26,7 @@ def _nullable(kind="string"):
     return {"type": [kind, "null"]}
 
 
-MODEL_CONTRACT_VERSION = "semantic-model/1.1"
+MODEL_CONTRACT_VERSION = "semantic-model/1.2"
 PERIOD_SCHEMA = {"type": "object", "additionalProperties": False,
     "required": ["start", "end_exclusive"],
     "properties": {"start": _nullable(), "end_exclusive": _nullable()}}
@@ -84,6 +84,28 @@ CLARIFICATION_INTENT_SCHEMA = {
 CLARIFICATION_SCHEMA = {"type": "object", "additionalProperties": False,
     "required": ["intent"], "properties": {"intent": CLARIFICATION_INTENT_SCHEMA}}
 
+METADATA_FILTER_SCHEMA = {"type": "object", "additionalProperties": False,
+    "required": ["field_id", "operator", "value"],
+    "properties": {"field_id": {"type": "string"},
+        "operator": {"type": "string", "enum": ["="]}, "value": {"type": "string"}}}
+METADATA_CANDIDATE_PLAN_SCHEMA = {"type": ["object", "null"], "additionalProperties": False,
+    "required": ["name", "definition", "catalog_snapshot_id", "datasource_id", "dataset_id",
+        "operation", "measure_field_id", "time_field_id", "dimension_field_ids", "filters",
+        "unit_label", "null_policy"],
+    "properties": {
+        "name": {"type": "string"}, "definition": {"type": "string"},
+        "catalog_snapshot_id": {"type": "string"}, "datasource_id": {"type": "string"},
+        "dataset_id": {"type": "string"},
+        "operation": {"type": "string", "enum": ["COUNT_ROWS", "COUNT_DISTINCT", "SUM", "AVG"]},
+        "measure_field_id": _nullable(), "time_field_id": _nullable(),
+        "dimension_field_ids": {"type": "array", "maxItems": 2, "items": {"type": "string"}},
+        "filters": {"type": "array", "maxItems": 5, "items": METADATA_FILTER_SCHEMA},
+        "unit_label": {"type": "string"},
+        "null_policy": {"type": "string", "enum": ["EXCLUDE_AND_WARN"]}}}
+METADATA_CANDIDATE_SCHEMA = {"type": "object", "additionalProperties": False,
+    "required": ["candidate_plan"],
+    "properties": {"candidate_plan": METADATA_CANDIDATE_PLAN_SCHEMA}}
+
 EXPLAIN_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["summary", "limitations", "cited_ids"],
@@ -93,7 +115,8 @@ EXPLAIN_SCHEMA = {
         "cited_ids": {"type": "array", "items": {"type": "string"}},
     },
 }
-STAGE_SCHEMAS = {"intent": INTENT_SCHEMA, "clarification": CLARIFICATION_SCHEMA, "explain": EXPLAIN_SCHEMA}
+STAGE_SCHEMAS = {"intent": INTENT_SCHEMA, "clarification": CLARIFICATION_SCHEMA,
+    "metadata_candidate": METADATA_CANDIDATE_SCHEMA, "explain": EXPLAIN_SCHEMA}
 
 
 def canonical_hash(value):
@@ -209,6 +232,13 @@ def refine_intent(text, context=None, model_selection=None, request_id=None, dat
         raise ModelRuntimeError("MODEL_INPUT_INVALID", "澄清输入应为1至6000字文本")
     return invoke("clarification", {"question": text, "context": context or {}},
         CLARIFICATION_SCHEMA, model_selection, request_id, data_classification)
+
+
+def derive_metadata_candidate(text, context=None, model_selection=None, request_id=None, data_classification="synthetic"):
+    if not isinstance(text, str) or not text.strip() or len(text) > 6000:
+        raise ModelRuntimeError("MODEL_INPUT_INVALID", "候选口径输入应为1至6000字文本")
+    return invoke("metadata_candidate", {"question": text, "context": context or {}},
+        METADATA_CANDIDATE_SCHEMA, model_selection, request_id, data_classification)
 
 
 def cancel(request_id):

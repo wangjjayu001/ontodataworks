@@ -10,4 +10,5 @@
 
 ## 已完成
 
+- **2026-11-23 · 智能问数模型契约、目录回退与来源展示**：统一 Codex CLI bridge/backend `semantic-model/1.2` 及阶段 Schema 指纹校验；无发布语义命中时按权限回查固定目录并支持澄清、用户确认与单表参数化只读预览；问数结果中文结构化展示检查、明细和可展开来源证据；补齐聚合空集与零值区分。设计与离线回归见[实现设计](design/2026-11-23-agent-metadata-recall-results-design.md)、[实施计划](plans/2026-11-23-agent-metadata-recall-results-plan.md)和[验收报告](reports/2026-11-23-agent-metadata-recall-results.md)。
 - **2026-11-23 · 发布工程化**：独立导入当前工作树，拆分部署/功能文档，建立模块登记、PR/Issue 模板和检查流程。实际验证及 GitHub 状态见[发布报告](reports/2026-11-23-github-publication.md)。

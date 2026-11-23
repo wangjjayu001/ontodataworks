@@ -112,25 +112,13 @@ class ClarificationFlowTests(unittest.TestCase):
         self.assertEqual(len(self.db.scalars(select(AgentRun)).all()), 1)
         self.assertFalse(self.db.scalars(select(AgentJob)).all())
 
-    def test_comparison_answers_use_one_requirement_contract_and_preserve_periods(self):
+    def test_comparison_answers_stay_one_requirement_without_reparsing_both_as_new_metrics(self):
         self.command('direction', '2024年为基期，比较2025年')
         data = self.command('growth', '两者都要')
         req = data['run']['requirements'][0]
-        self.assertEqual(req['state'], 'DRAFT')
+        self.assertEqual(req['state'], 'TARGET_CONFIRMATION')
         self.assertEqual(len(req['intent_frame']['clarification_answers']), 2)
-        jobs = self.db.scalars(select(AgentJob)).all()
-        self.assertEqual(len(jobs), 1)
-        self.assertEqual(jobs[0].kind, 'CLARIFY')
-        self.worker(jobs[0].id)
-        requirements = self.db.get(AgentRun, 'run-test').payload['requirements']
-        self.assertEqual(len(requirements), 1)
-        self.assertEqual(requirements[0]['state'], 'TARGET_CONFIRMATION')
-        self.assertEqual(requirements[0]['id'], 'requirement-test')
-        self.assertEqual(requirements[0]['intent_frame']['analysis'], {
-            'kind': 'PERIOD_COMPARISON',
-            'base_period': {'start': '2024-01-01', 'end_exclusive': '2025-01-01'},
-            'comparison_period': {'start': '2025-01-01', 'end_exclusive': '2026-01-01'},
-            'measures': ['GROWTH_RATE', 'ABSOLUTE_CHANGE']})
+        self.assertFalse(self.db.scalars(select(AgentJob)).all())
 
     def test_final_answer_queues_only_reparse_and_keeps_cas(self):
         self.queue()
@@ -213,6 +201,91 @@ class ClarificationFlowTests(unittest.TestCase):
         req = self.db.get(AgentRun, 'run-test').payload['requirements'][0]
         self.assertEqual(req['state'], 'MODEL_FAILED')
         self.assertEqual(req['error']['code'], 'MODEL_UNAVAILABLE')
+
+    def test_metadata_only_recall_after_clarification_reaches_confirmed_sql_preview(self):
+        intent={'question':'2025年按订单创建时间统计订单数，使用源库时间不转换',
+            'original_question':'2025年按订单创建时间统计订单数，使用源库时间不转换',
+            'metric_terms':['订单数'],'dimension_terms':[],'dimension_ids':[],
+            'start':'2025-01-01','end_exclusive':'2026-01-01','timezone':'SOURCE',
+            'time_event':'订单创建时间','filters':[],'negative_terms':[],
+            'analysis':{'kind':'NONE'},'depends_on_requirement_ids':[]}
+        rid='metadata-requirement'
+        dataset_ref={'catalog_snapshot_id':'catalog-1','datasource_id':'3','dataset_id':'dwd.orders'}
+        discovery={'schema_version':'query-metadata-context/1.0.0','release_id':'release-1',
+            'release_hash':'release-hash','index_snapshot_id':'index-1','index_snapshot_hash':'index-hash',
+            'tables':[{'catalog_snapshot_id':'catalog-1','catalog_snapshot_hash':'catalog-hash',
+                'datasource_id':'3','dataset_id':'dwd.orders','dataset_ref':dataset_ref,
+                'table_label':'订单事实表','table_definition':'订单事实表','logical_locator':'dwd.orders',
+                'namespace':'dwd','physical_name':'fct_orders','schema_fingerprint':'schema-fingerprint',
+                'constraints_state':'DECLARED','key_constraints':[],
+                'fields':[{'field_id':'order_id','name':'order_id','name_zh':'订单编号','definition':'订单唯一标识',
+                    'data_type':'text','nullable':False,'semantic_role':'IDENTIFIER','unit':None,
+                    'classification':'INTERNAL','is_primary':True},
+                    {'field_id':'created_at','name':'created_at','name_zh':'订单创建时间','definition':'订单创建事件',
+                    'data_type':'timestamp without time zone','nullable':False,'semantic_role':'EVENT_TIME',
+                    'unit':None,'classification':'INTERNAL','is_primary':False}]}],
+            'match_status':'RETRIEVAL_CANDIDATE','notice':'固定发布目录候选'}
+        discovery['content_hash']=canonical_hash(discovery)
+        bundle={'bundle_id':'bundle-1','next_action':'NEED_CLARIFICATION','selected_metric_ref':None,
+            'selected_binding_ref':None,'release_id':'release-1','release_hash':'release-hash',
+            'index_snapshot_id':'index-1','index_snapshot_hash':'index-hash','candidates':[],
+            'closure_refs':[],'requested_dimension_refs':[],'coverage':[]}
+        req={'id':rid,'requirement_id':rid,'requirement_version':1,'clarification_parse_version':1,'question':intent['question'],
+            'intent_frame':intent,'intent_frame_hash':canonical_hash(intent),'state':'DRAFT',
+            'error':None,'answers':[{'clarification_id':'semantic','slot':'semantic_definition',
+                'question':'请说明统计方式','answer':'按订单编号去重计数'}],
+            'clarifications':[],'bundle':bundle,'bundle_content_hash':canonical_hash(bundle),
+            'metadata_discovery':discovery}
+        payload=copy.deepcopy(self.row.payload);payload.update(requirements=[req],state='DRAFT',trace_id='trace-metadata')
+        payload['pinned_deployment']={'release_id':'release-1','release_hash':'release-hash',
+            'index_snapshot_id':'index-1','index_snapshot_hash':'index-hash'}
+        payload['model_selection']={'model':'model-test'};self.row.payload=payload
+        self.row.state='DRAFT';self.db.commit()
+        job=AgentJob(id='job-metadata',workspace_id=31,run_id='run-test',requirement_id=rid,kind='CLARIFY',status='QUEUED')
+        self.db.add(job);self.db.commit()
+        parse_result={'output':{'intent':copy.deepcopy(intent)},'model':'model-test','tool_events':[]}
+        plan={'name':'订单数','definition':'按订单编号去重计数',
+            'catalog_snapshot_id':'catalog-1','datasource_id':'3','dataset_id':'dwd.orders',
+            'operation':'COUNT_DISTINCT','measure_field_id':'order_id','time_field_id':'created_at',
+            'dimension_field_ids':[],'filters':[],'unit_label':'个','null_policy':'EXCLUDE_AND_WARN'}
+        candidate_result={'output':{'candidate_plan':plan},'model':'model-test','tool_events':[]}
+        with patch('app.agent_worker.SessionLocal',sessionmaker(self.engine,expire_on_commit=False)), \
+             patch('app.agent_worker.pinned_model_vocabulary',return_value={}), \
+             patch('app.agent_worker.check_run_access'), \
+             patch('app.model_runtime.refine_intent',return_value=parse_result), \
+             patch('app.model_runtime.derive_metadata_candidate',return_value=candidate_result):
+            clarification_job('job-metadata')
+        self.db.expire_all();self.db.refresh(self.row)
+        req=self.row.payload['requirements'][0]
+        self.assertEqual(req['state'],'TARGET_CONFIRMATION')
+        self.assertEqual(req['metadata_candidate']['operation'],'COUNT_DISTINCT')
+
+        with patch('app.agent.check_run_access'), \
+             patch('app.semantic.retrieve',return_value=copy.deepcopy(bundle)), \
+             patch('app.semantic.metadata_candidates_for_bundle',return_value=discovery):
+            self.db.refresh(self.row);req=self.row.payload['requirements'][0]
+            body={'expected_run_version':self.row.run_version,'expected_requirement_version':req['requirement_version'],
+                'intent_frame_hash':req['intent_frame_hash']}
+            response=self.client.post('/api/workspaces/31/agent/runs/run-test/requirements/'+rid+'/confirm-intent',
+                json=body,headers={'Idempotency-Key':'confirm-target-metadata'})
+        self.assertEqual(response.status_code,200,response.text)
+        self.db.refresh(self.row);req=self.row.payload['requirements'][0]
+        self.assertEqual(req['state'],'NEED_CONFIRMATION')
+        self.assertTrue(req['metric_card']['candidate_only'])
+        self.assertIn('未命中已发布业务指标',req['metric_card']['notice'])
+
+        with patch('app.agent.check_run_access'):
+            self.db.refresh(self.row);req=self.row.payload['requirements'][0]
+            body={'expected_run_version':self.row.run_version,'expected_requirement_version':req['requirement_version'],
+                'bundle_content_hash':req['bundle_content_hash'],'metric_card_hash':req['metric_card_hash']}
+            response=self.client.post('/api/workspaces/31/agent/runs/run-test/requirements/'+rid+'/confirm-metric',
+                json=body,headers={'Idempotency-Key':'confirm-metadata-caliber'})
+        self.assertEqual(response.status_code,200,response.text)
+        self.db.refresh(self.row);req=self.row.payload['requirements'][0]
+        self.assertEqual(req['state'],'PREVIEW_READY')
+        self.assertIn('COUNT(DISTINCT "b"."order_id")',req['preview']['sql'])
+        self.assertIn('"dwd"."fct_orders"',req['preview']['sql'])
+        self.assertFalse(req['query_frame']['business_approved'])
 
 
 if __name__ == '__main__':

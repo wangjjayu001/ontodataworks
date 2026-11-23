@@ -166,6 +166,7 @@ def parse_job(job_id):
 
 def clarification_job(job_id):
     from .agent_clarification import clarified_question, merge_clarified_intent, confirmed_choices
+    from .agent_planner import normalize_metadata_candidate
     from .model_runtime import refine_intent
     with SessionLocal() as db:
         job = db.get(AgentJob, job_id); row = db.get(AgentRun, job.run_id)
@@ -178,6 +179,7 @@ def clarification_job(job_id):
         user = db.get(User, row.actor_id)
         workspace_access(db, user, row.workspace_id); check_run_access(db, row, user)
         vocabulary = pinned_model_vocabulary(db, row.workspace_id, user, payload['pinned_deployment'])
+        metadata_discovery = copy.deepcopy(previous.get('metadata_discovery'))
         question = clarified_question(previous)
     output = refine_intent(question, {'data_classification': 'synthetic', 'source_scope': 'local_validation',
         'confirmed_intent': confirmed_choices(previous),
@@ -193,6 +195,29 @@ def clarification_job(job_id):
     except PlanningBlocked as exc:
         intent, clarifications = previous['intent_frame'], []
         error = {'code': exc.code, 'message': exc.message}
+    metadata_candidate = None
+    candidate_call = None
+    candidate_question = None
+    if not error and not clarifications and metadata_discovery and not previous.get('bundle',{}).get('selected_metric_ref'):
+        from .model_runtime import derive_metadata_candidate
+        context = {'data_classification':'synthetic','source_scope':'local_validation',
+            'intent_frame':intent,'confirmed_intent':confirmed_choices(previous),
+            'metadata_candidates':metadata_model_context(metadata_discovery),
+            'warnings':['仅用固定发布中的可访问中文目录和字段释义；不得猜表、字段、关联、单位或SQL',
+                '查询候选只在本次本地技术验证使用，必须由用户确认，不得写入或发布语义资产']}
+        candidate_call = derive_metadata_candidate(question,context,payload['model_selection'],
+            request_id=job_id+':candidate',data_classification='synthetic')
+        plan=candidate_call.get('output',{}).get('candidate_plan')
+        if plan is not None:
+            try:
+                metadata_candidate=normalize_metadata_candidate(plan,metadata_discovery,intent,previous['bundle'],previous.get('answers',[]))
+            except PlanningBlocked as exc:
+                candidate_question=exc.message
+        else:
+            candidate_question='目录候选仍不能唯一支持这项计算。请明确统计对象、计算方式、时间字段、单位或具体分组字段。'
+        if not metadata_candidate and not clarifications:
+            clarifications=[{'id':new_id('clarify'),'slot':'semantic_definition',
+                'question':candidate_question or '目录候选仍不能唯一支持这项计算。请补充具体统计口径；单位或时间事件未确认时不会生成查询。','options':[]}]
     with SessionLocal() as db:
         job = db.get(AgentJob, job_id)
         row = db.scalar(select(AgentRun).where(AgentRun.id == job.run_id).with_for_update())
@@ -206,12 +231,66 @@ def clarification_job(job_id):
         pinned_model_vocabulary(db, row.workspace_id, user, payload['pinned_deployment'])
         req.update(intent_frame=intent, intent_frame_hash=canonical_hash(intent), clarifications=clarifications,
             state='BLOCKED_EVIDENCE' if error else 'NEED_CLARIFICATION' if clarifications else 'TARGET_CONFIRMATION', error=error)
+        if metadata_candidate:
+            req['metadata_candidate']=metadata_candidate
+        else:
+            req.pop('metadata_candidate',None)
         req['clarification_requires_reparse'] = False
         req['clarification_model_call'] = {k: v for k, v in output.items() if k != 'output'}
         req['clarification_model_call']['real_inference'] = True
+        if candidate_call:
+            req['metadata_candidate_model_call']={k:v for k,v in candidate_call.items() if k!='output'}
+            req['metadata_candidate_model_call']['real_inference']=True
         req['requirement_version'] += 1
         event(db, row, payload, 'clarification.parsed', req['id'], {'state': req['state']})
         save_run(db, row, payload); job.status = 'DONE'; db.commit()
+
+
+def metadata_model_context(discovery, max_bytes=12000):
+    """Bound the model input while keeping each field tied to its snapshot IDs."""
+    context=copy.deepcopy(discovery or {})
+    tables=[]
+    for table in context.get('tables',[])[:3]:
+        item={k:table.get(k) for k in ('catalog_snapshot_id','datasource_id','dataset_id','table_label',
+            'table_definition','logical_locator','schema_fingerprint','match_status','key_constraints')}
+        item['fields']=[]
+        for field in table.get('fields',[])[:10]:
+            item['fields'].append({k:field.get(k) for k in ('field_id','name','name_zh','definition','aliases',
+                'data_type','nullable','semantic_role','unit','legacy_unit_text','classification','is_primary')})
+        tables.append(item)
+    compact={k:context.get(k) for k in ('schema_version','release_id','release_hash','index_snapshot_id','index_snapshot_hash','content_hash','match_status','notice')}
+    compact['tables']=tables
+    while len(json.dumps(compact,ensure_ascii=False,separators=(',',':')).encode('utf-8'))>max_bytes and any(table['fields'] for table in compact['tables']):
+        largest=max(compact['tables'],key=lambda table:len(table['fields']))
+        largest['fields'].pop()
+    return compact
+
+
+def result_validation(frame, columns, values, truncated, measure_counts, warnings, checks):
+    items=[
+        {"code":"RESULT_SHAPE","label":"结果列结构","status":"PASS","detail":"结果列与本次固定查询方案一致"},
+        {"code":"METRIC_VALUE","label":"指标值校验","status":"PASS","detail":"计数结果为非负整数" if frame.get("result_kind")=="COUNT" else "结果已按字段类型与计算方式生成"},
+        {"code":"SOURCE_SCHEMA","label":"数据表结构","status":"PASS","detail":"实际查询数据表与已采集目录结构一致"},
+        {"code":"READ_ONLY","label":"只读与权限","status":"PASS","detail":"查询在只读事务中执行，并重新检查当前访问权限"},
+        {"code":"DATA_COVERAGE","label":"时间范围与覆盖","status":"PASS","detail":f"本次数据截止时间：{checks.get('data_as_of') or '来源未提供'}"},
+        {"code":"NULL_EMPTY_POLICY","label":"空值与无数据","status":"WARN" if warnings else "PASS",
+            "detail":"；".join(item.get("message","") for item in warnings) if warnings else "已按本次计算规则检查空值与空结果"},
+    ]
+    if truncated:
+        items.append({"code":"RESULT_COMPLETENESS","label":"结果完整性","status":"WARN",
+            "detail":"结果行数超过展示上限，仅返回前1000行"})
+    if frame.get("execution_authority")=="MetadataCandidate":
+        items.append({"code":"TEMPORARY_CALIBER","label":"临时口径状态","status":"NOT_APPROVED",
+            "detail":"本次口径来自目录元数据并经用户确认，仅用于本地技术验证，未作为正式语义资产发布"})
+    else:
+        items.append({"code":"BUSINESS_APPROVAL","label":"业务口径审批","status":"NOT_APPROVED",
+            "detail":"本地技术验证不代表业务Owner审批或生产授权"})
+    codes=[item["code"] for item in items]
+    summary="技术校验通过" + ("，结果已截断" if truncated else "") + ("，含需查看提醒" if warnings else "")
+    return {"status":"PASS","status_label":summary,"checks":codes,"check_items":items,
+        "business_approved":False,"measure_row_counts":measure_counts,"warnings":warnings,
+        "source_check_count":len(checks.get("verified_sources",[])),
+        "result_row_count":len(values),"result_column_count":len(columns)}
 
 
 def execution_job(job_id):
@@ -267,6 +346,8 @@ def execution_job(job_id):
         values = result.fetchmany(1001); columns = [d.name for d in result.description]
         values, no_data, warnings = apply_result_policies(frame, measure_counts, values)
     truncated = len(values) > 1000; values = values[:1000]
+    if truncated:
+        warnings=warnings+[{"code":"RESULT_TRUNCATED","message":"查询结果超过展示上限，仅展示前1000行","row_count_label":"返回行数","row_count":len(values)}]
     if columns != frame["result_shape"]:
         raise PlanningBlocked("RESULT_SHAPE_MISMATCH", "结果列与已确认方案不一致")
     if frame.get("result_kind") == "COUNT" or frame["metric_id"] in {"order_count", "session_count", "shipment_count", "promotion_orders"}:
@@ -288,12 +369,15 @@ def execution_job(job_id):
         query = QueryRun(workspace_id=wid, datasource_id=frame["datasource_id"], actor=user.username,
             sql=preview["sql"], status="success", row_count=len(values), duration_ms=int((time.monotonic()-started)*1000))
         db.add(query); db.flush()
+        from .query_provenance import build_query_provenance
+        provenance=build_query_provenance(db,wid,user,frame,req.get("bundle"),checks)
+        provenance["query_ref"].update(query_id=query.id,execution_id=execution_id,sql_hash=preview["sql_hash"])
         output = {"query_id": query.id, "execution_operation_id": execution_id, "columns": columns,
             "column_metadata": frame.get("result_column_metadata", []),
             "rows": jsonable_encoder(values, custom_encoder={Decimal: str}), "row_count": len(values), "truncated": truncated,
             "duration_ms": query.duration_ms, "data_as_of": checks["data_as_of"], "data_coverage": checks["data_coverage"],
-            "verified_sources": checks["verified_sources"], "validation": {"status": "PASS", "checks": ["result_shape", "metric_invariants", "physical_grain", "null_and_empty_policy"], "business_approved": False,
-                "measure_row_counts": measure_counts, "warnings": warnings},
+            "verified_sources": checks["verified_sources"], "provenance": provenance,
+            "validation": result_validation(frame,columns,values,truncated,measure_counts,warnings,checks),
             "no_data": no_data, "warnings": warnings, "data_batches":checks["data_batches"],
             "scope": "local_validation", "sql_hash": preview["sql_hash"], "query_frame_hash": frame["content_hash"],
             "release_id": req["bundle"]["release_id"], "index_snapshot_id": req["bundle"]["index_snapshot_id"], "executed_at": now().isoformat()}

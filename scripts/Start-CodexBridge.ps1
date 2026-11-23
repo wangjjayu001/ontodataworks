@@ -16,6 +16,11 @@ if ($LASTEXITCODE -ne 0 -or ($bridgePythonCheck -join '').Trim() -ne 'True') {
     throw 'A working Python 3.12+ is required. Start once with -PythonPath pointing to the installed Python executable.'
 }
 $PythonPath | Set-Content -LiteralPath $bridgePythonFile
+$bridgeContractJson = & $PythonPath -c "import json,sys;sys.path.insert(0,'backend');from app.model_runtime import MODEL_CONTRACT_VERSION,stage_schema_hashes;print(json.dumps({'model_contract_version':MODEL_CONTRACT_VERSION,'stage_schema_hashes':stage_schema_hashes()}))"
+if ($LASTEXITCODE -ne 0 -or -not $bridgeContractJson) {
+    throw 'Could not read the backend model contract. Verify the selected Python environment.'
+}
+$bridgeExpectedContract = ($bridgeContractJson -join '') | ConvertFrom-Json
 $bridgePidFile = Join-Path $bridgeLocal 'codex-bridge.pid'
 function Wait-BridgeModels {
     $bridgeTokenFile = Join-Path $bridgeLocal 'codex-bridge.token'
@@ -23,14 +28,25 @@ function Wait-BridgeModels {
         try {
             $bridgeToken = (Get-Content -LiteralPath $bridgeTokenFile -Raw).Trim()
             $bridgeCatalog = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/models" -Headers @{Authorization="Bearer $bridgeToken"} -TimeoutSec 25
+            if($bridgeCatalog.model_contract_version -ne $bridgeExpectedContract.model_contract_version){
+                throw "Codex bridge contract mismatch: running $($bridgeCatalog.model_contract_version), expected $($bridgeExpectedContract.model_contract_version)."
+            }
+            foreach($bridgeStage in $bridgeExpectedContract.stage_schema_hashes.PSObject.Properties.Name){
+                if($bridgeCatalog.stage_schema_hashes.$bridgeStage -ne $bridgeExpectedContract.stage_schema_hashes.$bridgeStage){
+                    throw "Codex bridge schema mismatch for stage '$bridgeStage'."
+                }
+            }
             if(@($bridgeCatalog.models).Count -gt 0){
-                Write-Output "Codex CLI model catalog ready ($(@($bridgeCatalog.models).Count) models)."
+                Write-Output "Codex CLI model catalog ready ($(@($bridgeCatalog.models).Count) models; $($bridgeExpectedContract.model_contract_version))."
                 return
             }
-        } catch { }
+        } catch {
+            if($_.Exception.Message -like 'Codex bridge contract mismatch:*' -or $_.Exception.Message -like 'Codex bridge schema mismatch*'){throw}
+            $bridgeLastError=$_.Exception.Message
+        }
         Start-Sleep -Seconds 1
     }
-    throw 'Codex bridge/model catalog did not become ready. Inspect local/codex-bridge.stderr.log; startup was not accepted.'
+    throw "Codex bridge/model catalog did not become ready. Inspect local/codex-bridge.stderr.log and restart a stale bridge after active requests finish. Last check: $bridgeLastError"
 }
 if (Test-Path -LiteralPath $bridgePidFile) {
     $bridgePid = [int](Get-Content -LiteralPath $bridgePidFile)

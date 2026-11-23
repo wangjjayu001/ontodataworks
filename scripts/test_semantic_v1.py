@@ -180,5 +180,19 @@ class SemanticTests(unittest.TestCase):
         self.assertTrue(metric_candidates)
         self.assertEqual(metric_candidates,sorted(metric_candidates,key=lambda item:item["fused_rank"]))
 
+    def test_19_unmatched_metric_retrieves_readable_catalog_for_clarification(self):
+        intent=self.intent("2025年统计紫色飞船的笑声数量", "紫色飞船的笑声数量")
+        bundle=self.bundle(intent)
+        self.assertIsNone(bundle["selected_metric_ref"])
+        self.assertEqual(bundle["next_action"], "NEED_CLARIFICATION")
+
+        discovery=metadata_candidates_for_bundle(self.db, 3, self.user, bundle)
+        self.assertIsNotNone(discovery)
+        self.assertEqual(discovery["match_status"], "CATALOG_DISCOVERY_ONLY")
+        self.assertEqual(discovery["release_id"], bundle["release_id"])
+        self.assertEqual(discovery["index_snapshot_id"], bundle["index_snapshot_id"])
+        self.assertTrue(discovery["tables"])
+        self.assertTrue(any(field["field_id"] for table in discovery["tables"] for field in table["fields"]))
+
 
 if __name__=="__main__":unittest.main(verbosity=2)

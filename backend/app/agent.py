@@ -10,7 +10,7 @@ from sqlalchemy import select, func, text
 from .db import SessionLocal, User, Audit, QueryRun, Lineage, Datasource, LoginSession, now
 from .security import identity, db_session, workspace_access
 from .agent_models import AgentConversation, AgentRun, AgentCommand, AgentEvent, AgentJob, AgentExecution, AgentFeedback
-from .agent_planner import canonical_hash, new_id, PlanningBlocked, compile_preview, source_check
+from .agent_planner import canonical_hash, new_id, PlanningBlocked, compile_preview, compile_metadata_preview, normalize_metadata_candidate, source_check
 
 router = APIRouter(prefix="/api/workspaces/{wid}/agent", tags=["agent-v1"])
 TERMINAL = {"DELIVERED", "CANCELLED", "EXECUTION_FAILED", "MODEL_FAILED"}
@@ -18,6 +18,14 @@ TERMINAL = {"DELIVERED", "CANCELLED", "EXECUTION_FAILED", "MODEL_FAILED"}
 
 def fail(code, message, status=409):
     raise HTTPException(status, {"code": code, "message": message})
+
+
+def model_failure(exc, default_message):
+    """Keep bridge contract errors visible to the caller instead of hiding them."""
+    from .model_runtime import ModelRuntimeError
+    if isinstance(exc, ModelRuntimeError):
+        fail(exc.code, exc.message, 503 if exc.retryable else 422)
+    fail("MODEL_DIRECTORY_UNAVAILABLE", default_message, 503)
 
 
 def envelope(wid, data, request_id=None):
@@ -41,17 +49,50 @@ def run_row(db, wid, run_id, user, lock=False):
 
 
 def check_run_access(db, row, user):
-    from .semantic import check_bundle_access
+    from .semantic import check_bundle_access, can_read_physical, can_read_asset, resolve_asset
+    from .semantic_models import SemanticRelease
     from .pipeline_catalog import guard_asset
     from .db import Asset
     for req in row.payload.get("requirements", []):
         if req.get("bundle"):
             check_bundle_access(db, row.workspace_id, user, req["bundle"])
+        discovery=req.get("metadata_discovery") or {}
+        for table in discovery.get("tables",[]):
+            dataset_ref=table.get("dataset_ref") or {}
+            release=db.get(SemanticRelease,discovery.get("release_id"))
+            scope=release.scope if release else "local_validation"
+            targets=[dataset_ref]+[{**dataset_ref,"field_id":field.get("field_id")} for field in table.get("fields",[]) if field.get("field_id")]
+            if any(not can_read_physical(db,row.workspace_id,user,target,scope) for target in targets):
+                fail("BLOCKED_PERMISSION","历史目录候选的现时读取政策已失效",403)
+        candidate=req.get("metadata_candidate") or {}
+        candidate_ref=candidate.get("dataset_ref")
+        if candidate_ref:
+            release=db.get(SemanticRelease,candidate.get("release_id"))
+            scope=release.scope if release else "local_validation"
+            targets=[candidate_ref]+[{**candidate_ref,"field_id":field.get("field_id")} for field in
+                [candidate.get("metric_field"),candidate.get("time_field"),*candidate.get("dimension_fields",[]),
+                 *[item.get("field") for item in candidate.get("filters",[])]] if field and field.get("field_id")]
+            if any(not can_read_physical(db,row.workspace_id,user,target,scope) for target in targets):
+                fail("BLOCKED_PERMISSION","临时口径所引用的目录字段当前不可读取",403)
         for source in req.get("result", {}).get("verified_sources", []):
             asset = db.get(Asset, source.get("asset_id"))
             if not asset or asset.workspace_id != row.workspace_id:
                 fail("BLOCKED_PERMISSION", "历史结果来源不可用", 403)
             guard_asset(db, row.workspace_id, user, asset, raw=True)
+        provenance=req.get("result",{}).get("provenance") or {}
+        for source in provenance.get("tables",[]):
+            dataset_ref=source.get("dataset_ref")
+            if dataset_ref and not can_read_physical(db,row.workspace_id,user,dataset_ref,"local_validation"):
+                fail("BLOCKED_PERMISSION","历史结果目录来源的现时读取政策已失效",403)
+            for field in source.get("fields",[]):
+                field_ref=field.get("field_ref")
+                if field_ref and not can_read_physical(db,row.workspace_id,user,field_ref,"local_validation"):
+                    fail("BLOCKED_PERMISSION","历史结果字段来源的现时读取政策已失效",403)
+        semantic_refs=[item.get("asset_ref") for item in provenance.get("semantic_assets",[])]
+        semantic_refs += [item.get("evidence_ref") or item.get("claim_ref") for item in provenance.get("evidence",[])]
+        for target in semantic_refs:
+            if target and not can_read_asset(db,row.workspace_id,user,resolve_asset(db,row.workspace_id,target)):
+                fail("BLOCKED_PERMISSION","历史结果语义证据的现时读取政策已失效",403)
 
 
 def _actions(req, user):
@@ -152,8 +193,8 @@ def models(wid: int, user=Depends(identity), db=Depends(db_session)):
     from .model_runtime import list_models
     try:
         return envelope(wid, list_models())
-    except Exception:
-        fail("MODEL_DIRECTORY_UNAVAILABLE", "模型服务暂不可用，请检查本地模型适配服务", 503)
+    except Exception as exc:
+        model_failure(exc, "模型服务暂不可用，请检查本地模型适配服务")
 
 
 @router.get("/conversations")
@@ -205,7 +246,7 @@ def create_run(wid: int, body: dict, request: Request, user=Depends(identity), d
         fail("MODEL_PRODUCTION_DISABLED", "当前模型运行环境仅验收本地合成材料，生产问数尚未开放")
     from .model_runtime import list_models
     try: directory = list_models()
-    except Exception: fail("MODEL_DIRECTORY_UNAVAILABLE", "模型目录不可用", 503)
+    except Exception as exc: model_failure(exc, "模型目录不可用")
     selection = body.get("model_selection") or {}
     available = directory.get("models", directory.get("data", []))
     chosen = next((m for m in available if selection.get("model") in {m.get("id"), m.get("model")}), None)
@@ -258,16 +299,50 @@ def _selection_ref_match(body, key, expected):
 def _retrieve(db, row, payload, req, user):
     from .agent_clarification import check_analysis_support
     check_analysis_support(req["intent_frame"])
-    from .semantic import retrieve
+    from .semantic import retrieve, metadata_candidates_for_bundle
     req["intent_frame_hash"] = canonical_hash(req["intent_frame"])
     bundle = retrieve(db, row.workspace_id, user, row.id, req["id"], req["intent_frame"], payload["pinned_deployment"],
         request_id=payload["request_id"], trace_id=payload["trace_id"])
     req["bundle"] = bundle; req["bundle_content_hash"] = canonical_hash(bundle)
+    discovery=metadata_candidates_for_bundle(db,row.workspace_id,user,bundle)
+    req["metadata_discovery"]=discovery
+    candidate=req.get("metadata_candidate")
+    candidate_valid=bool(candidate and discovery and candidate.get("intent_frame_hash")==req.get("intent_frame_hash")
+        and candidate.get("metadata_context_hash")==discovery.get("content_hash")
+        and candidate.get("release_hash")==bundle.get("release_hash")
+        and candidate.get("index_snapshot_hash")==bundle.get("index_snapshot_hash")
+        and candidate.get("content_hash")==canonical_hash({k:v for k,v in candidate.items() if k!="content_hash"})
+        and not bundle.get("selected_metric_ref") and bundle.get("next_action")=="NEED_CLARIFICATION")
+    if candidate_valid:
+        start=candidate["time_range"]["start"];end=candidate["time_range"]["end_exclusive"]
+        dims=candidate.get("dimension_fields",[])
+        metric_card={"name":candidate["name"],"metric_id":"metadata:"+candidate["candidate_id"],
+            "definition":candidate["definition"],"unit":candidate["unit"],"time_expression":candidate["time_field"]["name_zh"],
+            "start":start,"end_exclusive":end,"dimensions":[field["name_zh"] for field in dims],
+            "scope":"local_validation","business_approved":False,"candidate_only":True,
+            "logical_expression":candidate["definition"],"physical_expression":candidate["operation"]+
+                ("（"+candidate["metric_field"]["name_zh"]+"）" if candidate.get("metric_field") else "（表记录数）"),
+            "physical_source":candidate["physical_source"],"time_field":candidate["time_field"],
+            "notice":"未命中已发布业务指标。本次口径由固定目录元数据形成，仅用于本地技术验证；不会自动写入或发布语义资产。"}
+        req.update(metric_card=metric_card,metric_card_hash=canonical_hash(metric_card),state="NEED_CONFIRMATION",
+            error=None,clarifications=[],effective_next_action="NEED_CONFIRMATION")
+        event(db,row,payload,"metadata_candidate.confirmation.required",req["id"],
+            {"candidate_id":candidate["candidate_id"],"candidate_hash":candidate["content_hash"],"bundle_id":bundle["bundle_id"]})
+        return
     if bundle["next_action"] not in {"PREVIEW_ONLY", "NEED_CONFIRMATION"}:
         req["state"] = "NEED_CLARIFICATION" if bundle["next_action"] == "NEED_CLARIFICATION" else "BLOCKED_PERMISSION" if bundle["next_action"] == "BLOCKED_PERMISSION" else "BLOCKED_EVIDENCE"
         req["error"] = {"code": bundle["next_action"], "message": "；".join(c["reason"] for c in bundle["coverage"] if c["status"] != "COMPLETE") or "当前语义路径尚未具备完整证据"}
         if req["state"] == "NEED_CLARIFICATION":
-            req["clarifications"] = [{"id": new_id("clarify"), "slot": "semantic", "question": req["error"]["message"], "options": []}]
+            if not bundle.get("selected_metric_ref"):
+                if discovery:
+                    labels="、".join(table["table_label"]+"（"+", ".join(field["name_zh"] for field in table["fields"][:8])+"）" for table in discovery["tables"])
+                    question="尚未匹配到已发布业务指标。已从固定目录找到以下可访问表/字段候选："+labels+"。请说明统计对象、记录数/去重计数/求和/平均值、时间字段及分组；候选口径须经你确认后才会生成查询。"
+                    req["metadata_discovery"]=discovery
+                else:
+                    question="尚未找到匹配的已发布业务指标或目录字段。请补充具体业务对象、表名或字段名；系统会在当前权限内先查目录，不会猜测物理字段。"
+                req["clarifications"] = [{"id": new_id("clarify"), "slot": "semantic_definition", "question": question, "options": []}]
+            else:
+                req["clarifications"] = [{"id": new_id("clarify"), "slot": "semantic", "question": req["error"]["message"], "options": []}]
         event(db, row, payload, "retrieval.completed", req["id"], {"bundle_id": bundle["bundle_id"], "next_action": bundle["next_action"]})
         return
     from .semantic import get_execution_contract
@@ -321,11 +396,14 @@ def requirement_command(wid: int, run_id: str, rid: str, action: str, body: dict
         elif action == "confirm-metric":
             _selection_ref_match(body, "bundle_content_hash", req["bundle_content_hash"])
             _selection_ref_match(body, "metric_card_hash", req["metric_card_hash"])
-            from .semantic import get_execution_contract
-            contract = get_execution_contract(db, wid, req["bundle"]["selected_binding_ref"])
             confirmation = {"id": new_id("confirm"), "actor_id": user.id, "at": now().isoformat(), "bundle_hash": req["bundle_content_hash"], "metric_card_hash": req["metric_card_hash"]}
             req["metric_confirmation"] = confirmation
-            frame, preview = compile_preview(contract, req["intent_frame"], req["bundle"], row.id, rid, confirmation)
+            if req.get("metadata_candidate"):
+                frame, preview = compile_metadata_preview(req["metadata_candidate"],req["intent_frame"],req["bundle"],row.id,rid,confirmation)
+            else:
+                from .semantic import get_execution_contract
+                contract = get_execution_contract(db, wid, req["bundle"]["selected_binding_ref"])
+                frame, preview = compile_preview(contract, req["intent_frame"], req["bundle"], row.id, rid, confirmation)
             req.update(query_frame=frame, query_frame_ref={"id": frame["frame_id"], "revision": frame["revision"], "content_hash": frame["content_hash"]}, preview=preview, sql_hash=preview["sql_hash"], state="PREVIEW_READY")
             event(db, row, payload, "preview.ready", rid, {"query_frame_ref": req["query_frame_ref"], "sql_hash": preview["sql_hash"]})
         elif action == "preview":
