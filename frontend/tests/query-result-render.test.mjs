@@ -10,8 +10,28 @@ const esbuild=createRequire(require.resolve('vite'))('esbuild');
 const compiled=await esbuild.build({entryPoints:[fileURLToPath(new URL('../src/SmartQuery.jsx',import.meta.url))],bundle:true,platform:'node',format:'cjs',write:false,loader:{'.css':'empty'},external:['react','lucide-react'],logLevel:'silent'});
 const loaded={exports:{}};
 new Function('require','module','exports',compiled.outputFiles[0].text)(require,loaded,loaded.exports);
-const {ResultTable,IntentSummary,SemanticPath,MetadataDiscovery}=loaded.exports;
+const {ResultTable,IntentSummary,SemanticPath,MetadataDiscovery,TimePeriodEditor,QueryProgress}=loaded.exports;
 const render=result=>renderToStaticMarkup(React.createElement(ResultTable,{result}));
+
+test('comparison editor shows independent inclusive dates with a reversible base period',()=>{
+ const periods=[{label:'2025年5月',start:'2025-05-01',end_exclusive:'2025-06-01'},{label:'2025年6月',start:'2025-06-01',end_exclusive:'2025-07-01'}];
+ const html=renderToStaticMarkup(React.createElement(TimePeriodEditor,{periods,comparison:true}));
+ for(const text of ['确认对比时间段','2025-05-01','2025-05-31','2025-06-01','2025-06-30','基期','对比期 1','设为基期','添加时间段','确认这些时间范围'])assert.ok(html.includes(text),text);
+ assert.ok(!html.includes('2025-07-01'));
+ const summary=renderToStaticMarkup(React.createElement(IntentSummary,{intent:{metric_terms:['ROI'],time_periods:periods}}));
+ assert.ok(summary.includes('基期：2025-05-01'));
+ assert.ok(summary.includes('对比期 1：2025-06-01'));
+ assert.ok(!summary.includes('需要补充'));
+});
+
+test('model progress exposes actual phase, elapsed seconds and a cancellation action without percentages',()=>{
+ const html=renderToStaticMarkup(React.createElement(QueryProgress,{progress:{phase:'MODEL_RUNNING',label:'正在识别问题、指标和时间',started_at:new Date(Date.now()-26000).toISOString()},onCancel:()=>{}}));
+ assert.ok(html.includes('问题识别进度'));
+ assert.ok(html.includes('正在识别问题、指标和时间'));
+ assert.ok(html.includes('已等待 26 秒'));
+ assert.ok(html.includes('取消本次识别'));
+ assert.ok(!html.includes('%'));
+});
 
 test('intent summary exposes accepted clarification answers beside the business constraints',()=>{
  const html=renderToStaticMarkup(React.createElement(IntentSummary,{intent:{metric_terms:['销售额'],clarification_answers:[{slot:'comparison_direction',question:'比较方向',answer:'2024年为基期，比较2025年'},{slot:'growth_measure',question:'增长方式',answer:'两者都要'}]}}));

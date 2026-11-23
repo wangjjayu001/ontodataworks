@@ -12,6 +12,7 @@ PR scope：`agent`；GitHub 标签：`module:agent`。
 - `backend/app/model_runtime.py`
 - `backend/app/query_provenance.py`
 - `frontend/src/SmartQuery.jsx`
+- `frontend/src/Query*.jsx`
 - `frontend/src/smart-query.css`
 - `frontend/src/CodexModelPicker.jsx`
 - `frontend/src/codex-models.json`

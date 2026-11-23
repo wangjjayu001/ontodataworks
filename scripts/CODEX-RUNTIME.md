@@ -44,9 +44,11 @@ CODEX_BRIDGE_TOKEN_FILE=/run/secrets/codex_bridge_token
 
 目录选择只接受实际 model/list 中的模型、supportedReasoningEfforts 和 serviceTiers；目录 hash 过期需重选，不静默换模型。`outputSchema` 只约束最终助手消息，后端再次验证小型闭合 Schema，不把输出或文字“通过”视为业务核验。
 
+`parse_intent`、`refine_intent`、`derive_metadata_candidate` 支持内部 `progress_callback`。一次模型调用只提交一次 `/invoke`，等待期间按认证令牌读取 `/requests/{request_id}` 的连接/推理/输出校验阶段；不存在请求不返回输入或输出，阶段记录最多保留 256 条。API worker 把阶段写入运行事件，取消或终态之后的迟到更新会丢弃。前端每秒更新本地耗时，并通过现有运行轮询读取阶段。
+
 ## 运行约束与测试
 
-桥接只开放带服务 token 的 `/health /models /invoke /cancel`；拒绝浏览器 Origin、未知参数、过大请求及原始 command/fs/config/account RPC。每次模型步骤使用新临时 cwd 和 ephemeral thread，禁用已知 shell/exec/apps/plugins/browser/computer/image/multi-agent 等 feature；没有 dynamicTools，发现任何 server tool/approval 请求或工具 item 即拒绝/结束步骤。stderr 仅留内存，HTTP 错误不返回宿主路径或原始响应。
+桥接只开放带服务 token 的 `/health /models /invoke /cancel` 及请求阶段查询 `/requests/{request_id}`；拒绝浏览器 Origin、未知参数、过大请求及原始 command/fs/config/account RPC。每次模型步骤使用新临时 cwd 和 ephemeral thread，禁用已知 shell/exec/apps/plugins/browser/computer/image/multi-agent 等 feature；没有 dynamicTools，发现任何 server tool/approval 请求或工具 item 即拒绝/结束步骤。stderr 仅留内存，HTTP 错误不返回宿主路径或原始响应。
 
 上述 feature 和回调控制不等于已经证明 OS/网络隔离。服务仅接受 synthetic/public 分类，生产/机密分类失败关闭；调用方必须核实材料类别，不能仅把真实敏感材料改标签为 synthetic。当前工作空间真实查询使用本地合成数仓，**不向模型发送结果明细、结果数值、数据源凭据或用户文件**。模型仅解析问句；语义回源、规划、授权和执行在后端进行。
 

@@ -12,6 +12,8 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from urllib.parse import quote
 
 
 class ModelRuntimeError(RuntimeError):
@@ -197,7 +199,7 @@ def stage_schema_hashes():
     return {stage: canonical_hash(schema) for stage, schema in STAGE_SCHEMAS.items()}
 
 
-def invoke(stage, input_payload, output_schema=None, model_selection=None, request_id=None, data_classification="synthetic"):
+def invoke(stage, input_payload, output_schema=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
     if stage not in STAGE_SCHEMAS:
         raise ModelRuntimeError("MODEL_STAGE_UNSUPPORTED", "不支持的模型处理阶段")
     schema = STAGE_SCHEMAS[stage]
@@ -205,40 +207,62 @@ def invoke(stage, input_payload, output_schema=None, model_selection=None, reque
         raise ModelRuntimeError("MODEL_SCHEMA_UNSUPPORTED", "模型输出契约未登记")
     if data_classification not in {"synthetic", "public"}:
         raise ModelRuntimeError("MODEL_PRODUCTION_DISABLED", "当前模型运行仅开放本地合成或公开材料验证")
-    result = _bridge_call("/invoke", {
-        "request_id": request_id or "model_" + uuid.uuid4().hex,
+    ident = request_id or "model_" + uuid.uuid4().hex
+    body = {
+        "request_id": ident,
         "stage": stage, "input": input_payload,
         "model_contract_version": MODEL_CONTRACT_VERSION,
         "output_schema_hash": canonical_hash(schema),
         "model_selection": model_selection or {},
         "data_classification": data_classification,
-    })
+    }
+    if progress_callback is None:
+        result = _bridge_call('/invoke', body)
+    else:
+        last_phase = 'CONNECTING'
+        progress_callback(last_phase)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(_bridge_call, '/invoke', body)
+            while True:
+                try:
+                    result = pending.result(timeout=1)
+                    break
+                except FutureTimeout:
+                    try:
+                        status = _bridge_call('/requests/' + quote(ident, safe=':'), timeout=2)
+                    except ModelRuntimeError:
+                        continue
+                    phase = status.get('phase')
+                    if phase in {'CONNECTING', 'MODEL_RUNNING', 'VALIDATING'} and phase != last_phase:
+                        progress_callback(phase)
+                        last_phase = phase
+        progress_callback('VALIDATING')
     if result.get("model_contract_version") != MODEL_CONTRACT_VERSION or result.get("output_schema_hash") != canonical_hash(schema):
         raise ModelRuntimeError("MODEL_CONTRACT_MISMATCH", "模型CLI返回的数据契约与本次请求不一致", True)
     validate_output(result.get("output"), schema)
     return result
 
 
-def parse_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic"):
+def parse_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
     if not isinstance(text, str) or not text.strip() or len(text) > 6000:
         raise ModelRuntimeError("MODEL_INPUT_INVALID", "问题应为1至6000字文本")
     # Context must contain permitted semantic labels, not raw source rows or secrets.
-    result = invoke("intent", {"question": text, "context": context or {}}, INTENT_SCHEMA, model_selection, request_id, data_classification)
+    result = invoke("intent", {"question": text, "context": context or {}}, INTENT_SCHEMA, model_selection, request_id, data_classification, progress_callback=progress_callback)
     return result
 
 
-def refine_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic"):
+def refine_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
     if not isinstance(text, str) or not text.strip() or len(text) > 6000:
         raise ModelRuntimeError("MODEL_INPUT_INVALID", "澄清输入应为1至6000字文本")
     return invoke("clarification", {"question": text, "context": context or {}},
-        CLARIFICATION_SCHEMA, model_selection, request_id, data_classification)
+        CLARIFICATION_SCHEMA, model_selection, request_id, data_classification, progress_callback=progress_callback)
 
 
-def derive_metadata_candidate(text, context=None, model_selection=None, request_id=None, data_classification="synthetic"):
+def derive_metadata_candidate(text, context=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
     if not isinstance(text, str) or not text.strip() or len(text) > 6000:
         raise ModelRuntimeError("MODEL_INPUT_INVALID", "候选口径输入应为1至6000字文本")
     return invoke("metadata_candidate", {"question": text, "context": context or {}},
-        METADATA_CANDIDATE_SCHEMA, model_selection, request_id, data_classification)
+        METADATA_CANDIDATE_SCHEMA, model_selection, request_id, data_classification, progress_callback=progress_callback)
 
 
 def cancel(request_id):

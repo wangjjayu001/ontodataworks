@@ -102,6 +102,8 @@ def _actions(req, user):
         "GATE_PASSED": ["authorize"], "AUTHORIZED": ["execute"]}.get(state, [])
     if user.role != "admin":
         actions = [a for a in actions if a not in {"gate", "authorize", "execute"}]
+    if state in {"NEED_CLARIFICATION", "TARGET_CONFIRMATION"}:
+        actions = actions + ["time-periods"]
     if state not in TERMINAL and state != "EXECUTION_UNKNOWN":
         actions = actions + ["cancel"]
     return actions
@@ -112,6 +114,11 @@ def view(row, user):
     data.update({"id": row.id, "run_id": row.id, "state": row.state, "run_version": row.run_version,
         "conversation_id": row.conversation_id, "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()})
     for req in data.get("requirements", []):
+        if req['state'] in {'NEED_CLARIFICATION', 'TARGET_CONFIRMATION'}:
+            from .agent_time import prepare_periods
+            proposed = copy.deepcopy(req['intent_frame'])
+            req['clarifications'] = prepare_periods(proposed, req.get('clarifications', []))
+            req['suggested_time_periods'] = proposed.get('time_periods', [])
         req["allowed_actions"] = _actions(req, user)
     data["allowed_actions"] = [] if row.state in TERMINAL else ["cancel"]
     data["last_event_id"] = row.payload.get("event_seq", 0)
@@ -274,7 +281,8 @@ def create_run(wid: int, body: dict, request: Request, user=Depends(identity), d
         "scope_notice": "本地合成数据技术验证，未经生产业务审批", "model_selection": selection,
         "interaction_mode": body.get("interaction_mode", "CONVERSATION"), "pinned_deployment": deployment,
         "request_id": body.get("request_id") or new_id("req"), "trace_id": new_id("trace"),
-        "requirements": [], "event_seq": 0, "state": "DRAFT", "attempt": 1}
+        "requirements": [], "event_seq": 0, "state": "DRAFT", "attempt": 1,
+        "model_progress": {"phase": "QUEUED", "label": "问题已受理，等待识别", "started_at": now().isoformat(), "updated_at": now().isoformat()}}
     row = AgentRun(id=new_id("run"), workspace_id=wid, actor_id=user.id, conversation_id=conv.id, payload=payload)
     db.add(row); db.flush()
     event(db, row, payload, "run.accepted", detail={"model_selection": selection, "execution_mode": mode})
@@ -379,7 +387,19 @@ def requirement_command(wid: int, run_id: str, rid: str, action: str, body: dict
         fail("ACTION_NOT_ALLOWED", "当前状态或身份不允许此操作", 403)
     if action != "cancel": check_run_access(db, row, user)
     try:
-        if action == "clarifications":
+        if action == "time-periods":
+            from .agent_time import confirm_periods
+            try:
+                queued = confirm_periods(req, body.get('periods'))
+            except PlanningBlocked as exc:
+                fail(exc.code, exc.message, 422)
+            req['answers'][-1].update(actor_id=user.id, at=now().isoformat())
+            req['intent_frame_hash'] = canonical_hash(req['intent_frame'])
+            if queued:
+                req['model_progress'] = {'phase': 'QUEUED', 'label': '补充说明已受理，等待识别', 'started_at': now().isoformat(), 'updated_at': now().isoformat()}
+                db.add(AgentJob(id=new_id('job'), workspace_id=wid, run_id=row.id,
+                    requirement_id=rid, kind='CLARIFY', status='QUEUED'))
+        elif action == "clarifications":
             clarification = next((c for c in req.get("clarifications", []) if c["id"] == body.get("clarification_id")), None)
             if not clarification: fail("CLARIFICATION_STALE", "澄清项已变化")
             from .agent_clarification import apply_answer
@@ -387,6 +407,7 @@ def requirement_command(wid: int, run_id: str, rid: str, action: str, body: dict
             req["answers"][-1].update(actor_id=user.id, at=now().isoformat())
             req["intent_frame_hash"] = canonical_hash(req["intent_frame"])
             if queued:
+                req['model_progress'] = {'phase': 'QUEUED', 'label': '补充说明已受理，等待识别', 'started_at': now().isoformat(), 'updated_at': now().isoformat()}
                 db.add(AgentJob(id=new_id("job"), workspace_id=wid, run_id=row.id,
                     requirement_id=rid, kind="CLARIFY", status="QUEUED"))
         elif action == "confirm-intent":

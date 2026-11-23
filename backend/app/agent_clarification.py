@@ -72,9 +72,9 @@ def apply_answer(req, clarification, answer):
     """Mutate a copied requirement; HTTP validation errors leave persisted state intact."""
     from .agent import fail
     slot = clarification['slot']
-    if isinstance(answer, dict) and slot != 'time':
+    if isinstance(answer, dict) and slot not in {'time', 'time_periods'}:
         answer = answer.get('value', answer.get('text'))
-    if slot != 'time':
+    if slot not in {'time', 'time_periods'}:
         if not isinstance(answer, str) or not answer.strip() or len(answer) > 2000:
             fail('CLARIFICATION_VALUE_INVALID', '请提供1至2000字的明确说明', 422)
         answer = answer.strip()
@@ -112,6 +112,11 @@ def apply_answer(req, clarification, answer):
         if options and answer not in options:
             fail('CLARIFICATION_VALUE_INVALID', '请选择当前澄清项提供的时间事件', 422)
         confirmed.update(time_event=answer, requested_time_event=answer)
+    elif slot == 'time_periods':
+        from .agent_time import validate_periods, is_comparison
+        if not isinstance(answer, dict) or set(answer) != {'periods'}:
+            fail('TIME_PERIODS_INVALID', '请确认完整时间段', 422)
+        validate_periods(answer['periods'], is_comparison(intent))
     elif slot in {'comparison_direction', 'growth_measure'}:
         # These two slots have a closed, validated representation below. They
         # must remain in one requirement and do not need another model parse.
@@ -129,8 +134,11 @@ def apply_answer(req, clarification, answer):
     intent['clarification_answers'] = [{key: a[key] for key in ('slot', 'question', 'answer')}
         for a in req['answers'] if a.get('slot')]
     analysis = analysis_from_answers(req)
-    if analysis:
+    if analysis and not confirmed.get('time_periods_confirmed'):
         intent['analysis'] = analysis
+        if all(analysis.get(key, {}).get('start') and analysis.get(key, {}).get('end_exclusive') for key in ('base_period', 'comparison_period')):
+            from .agent_time import set_periods
+            set_periods(intent, [{'label': label, **analysis[key]} for label, key in [('基期', 'base_period'), ('对比期', 'comparison_period')]], confirmed=True)
     req['clarifications'] = [c for c in req['clarifications'] if c['id'] != clarification['id']]
     req['error'] = None
     # A revised intent invalidates any earlier retrieved or approved artifact.
@@ -154,8 +162,11 @@ def merge_clarified_intent(previous, intent, clarifications):
     intent['clarification_answers'] = copy.deepcopy(previous['intent_frame'].get('clarification_answers', []))
     intent['depends_on_requirement_ids'] = copy.deepcopy(previous['intent_frame'].get('depends_on_requirement_ids', []))
     analysis = analysis_from_answers(previous)
-    if analysis:
+    if analysis and not confirmed.get('time_periods_confirmed'):
         intent['analysis'] = analysis
+        from .agent_time import set_periods
+        if all(analysis.get(key, {}).get('start') and analysis.get(key, {}).get('end_exclusive') for key in ('base_period', 'comparison_period')):
+            set_periods(intent, [{'label': label, **analysis[key]} for label, key in [('基期', 'base_period'), ('对比期', 'comparison_period')]], confirmed=True)
     old_filters = previous['intent_frame'].get('filters', [])
     if any(f not in intent.get('filters', []) for f in old_filters):
         raise PlanningBlocked('CLARIFICATION_CONSTRAINT_LOST', '补充说明后的解析没有完整保留原筛选条件，未继续生成查询')
@@ -163,6 +174,8 @@ def merge_clarified_intent(previous, intent, clarifications):
         raise PlanningBlocked('CLARIFICATION_CONSTRAINT_LOST', '补充说明后的解析没有完整保留原分组要求，未继续生成查询')
     intent['negative_terms'] = list(dict.fromkeys(previous['intent_frame'].get('negative_terms', []) + intent.get('negative_terms', [])))
     resolved = set(confirmed)
+    if intent.get('time_periods_confirmed'):
+        resolved.update({'time', 'time_periods', 'comparison_direction'})
     if 'start' in resolved and 'end_exclusive' in resolved:
         resolved.add('time')
     if 'metric_id' in resolved:
@@ -177,4 +190,4 @@ def check_analysis_support(intent):
     if intent.get('analysis', {}).get('kind') == 'PERIOD_COMPARISON' or re.search(r'同比|环比|增长|year.over.year|year.on.year|growth|\byoy\b|\bmom\b', text, re.I) or any(
             a.get('slot') in comparison_slots for a in intent.get('clarification_answers', [])):
         raise PlanningBlocked('COMPARISON_PLANNING_UNSUPPORTED',
-            '已保留同比/增长分析要求；当前查询规划器尚未实现基期与比较期分别计算及增长率/增长金额，不能把两年合计当作同比结果。')
+            '已保留各时间段及对比方向；当前查询规划器尚未实现多期分别计算与增长分析，不能把多个时间段合并成一次总计。')

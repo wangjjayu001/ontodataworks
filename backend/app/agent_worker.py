@@ -21,6 +21,32 @@ from .agent_planner import canonical_hash, new_id, PlanningBlocked, source_check
 log = logging.getLogger("agent-worker")
 
 
+def model_progress(job_id, phase, section='intent'):
+    labels = {'CONNECTING': '正在连接模型服务', 'MODEL_RUNNING': '正在识别问题、指标和时间',
+              'VALIDATING': '正在核对识别结果'}
+    if phase not in labels:
+        return
+    with SessionLocal() as db:
+        job = db.get(AgentJob, job_id)
+        if not job or job.status not in {'QUEUED', 'RUNNING'}:
+            return
+        row = db.scalar(select(AgentRun).where(AgentRun.id == job.run_id).with_for_update())
+        payload = copy.deepcopy(row.payload)
+        req = next((r for r in payload.get('requirements', []) if r['id'] == job.requirement_id), None)
+        if payload.get('cancel_requested') or (req['state'] if req else row.state) != 'DRAFT':
+            return
+        target = req if req else payload
+        previous = target.get('model_progress', {})
+        if previous.get('phase') == phase and previous.get('section') == section:
+            return
+        target['model_progress'] = {'phase': phase, 'section': section,
+            'label': '正在根据目录整理候选口径' if section == 'metadata' and phase == 'MODEL_RUNNING' else labels[phase],
+            'started_at': previous.get('started_at') or job.created_at.isoformat(), 'updated_at': now().isoformat()}
+        event(db, row, payload, 'model.progress', job.requirement_id, target['model_progress'])
+        save_run(db, row, payload)
+        db.commit()
+
+
 def pinned_model_vocabulary(db, wid, user, deployment):
     """Only names from the exact deployed, currently readable dependency graph.
 
@@ -112,6 +138,8 @@ def normalize_intent(item, original):
     for c in item.get("clarifications", []):
         if c.get("slot") in {"timezone", "time", "metric"} or any(c.get("question") == x["question"] for x in clarifications): continue
         clarifications.append({"id": new_id("clarify"), "slot": c.get("slot", "semantic"), "question": c.get("question", "请明确业务口径"), "options": c.get("options", [])})
+    from .agent_time import prepare_periods
+    clarifications = prepare_periods(result, clarifications)
     return result, clarifications, None
 
 
@@ -128,7 +156,8 @@ def parse_job(job_id):
     from .model_runtime import parse_intent
     output = parse_intent(question, {"data_classification": "synthetic", "source_scope": "local_validation", "current_date": now().date().isoformat(),
         **vocabulary,
-        "warnings": ["买家状态与地区不同", "源库timestamp时区未知，不默默指定时区", "不允许生成SQL或编造资产ID"]}, selection, request_id=payload["request_id"])
+        "warnings": ["买家状态与地区不同", "源库timestamp时区未知，不默默指定时区", "不允许生成SQL或编造资产ID"]}, selection, request_id=payload["request_id"],
+        progress_callback=lambda phase: model_progress(job_id, phase))
     draft = output.get("output", output)
     if "requirements" not in draft and isinstance(draft.get("intent"), dict): draft = draft["intent"]
     requirements = draft.get("requirements")
@@ -159,6 +188,7 @@ def parse_job(job_id):
             payload["requirements"] = normalized
             payload["model_call"] = {k: v for k, v in output.items() if k not in {"output", "intent", "requirements"}}
             payload["model_call"]["real_inference"] = True
+            payload.setdefault('model_progress', {}).update(phase='COMPLETE', label='问题识别完成', updated_at=now().isoformat())
             event(db, row, payload, "requirements.updated", detail={"requirement_ids": [r["id"] for r in normalized]})
             job.status = "DONE"
         save_run(db, row, payload); db.commit()
@@ -187,7 +217,7 @@ def clarification_job(job_id):
         'warnings': ['只重新解析这一个需求项，保留原问题的筛选、分组和排除条件',
             '用户补充的答案是业务约束；已经明确回答的口径不要重复询问；不能推断用户未回答的选择',
             '同比或增长分析不能改写为两期合计，不允许生成SQL或资产ID']},
-        payload['model_selection'], request_id=job_id)
+        payload['model_selection'], request_id=job_id, progress_callback=lambda phase: model_progress(job_id, phase, 'clarification'))
     error = None
     try:
         intent, clarifications, error = normalize_intent(output['output']['intent'], question)
@@ -206,7 +236,8 @@ def clarification_job(job_id):
             'warnings':['仅用固定发布中的可访问中文目录和字段释义；不得猜表、字段、关联、单位或SQL',
                 '查询候选只在本次本地技术验证使用，必须由用户确认，不得写入或发布语义资产']}
         candidate_call = derive_metadata_candidate(question,context,payload['model_selection'],
-            request_id=job_id+':candidate',data_classification='synthetic')
+            request_id=job_id+':candidate',data_classification='synthetic',
+            progress_callback=lambda phase: model_progress(job_id, phase, 'metadata'))
         plan=candidate_call.get('output',{}).get('candidate_plan')
         if plan is not None:
             try:
@@ -242,6 +273,7 @@ def clarification_job(job_id):
             req['metadata_candidate_model_call']={k:v for k,v in candidate_call.items() if k!='output'}
             req['metadata_candidate_model_call']['real_inference']=True
         req['requirement_version'] += 1
+        req.setdefault('model_progress', {}).update(phase='COMPLETE', label='补充说明核对完成', updated_at=now().isoformat())
         event(db, row, payload, 'clarification.parsed', req['id'], {'state': req['state']})
         save_run(db, row, payload); job.status = 'DONE'; db.commit()
 
@@ -439,6 +471,7 @@ def record_failure(job_id, exc):
             if job.kind == "CLARIFY":
                 if req['state'] == 'DRAFT' and not payload.get('cancel_requested'):
                     req.update(state='MODEL_FAILED', error={'code': code, 'message': message})
+                    req.setdefault('model_progress', {}).update(phase='FAILED', label='识别未完成', updated_at=now().isoformat())
                     req['requirement_version'] += 1
                     event(db, row, payload, 'clarification.failed', req['id'], {'code': code, 'message': message})
                     save_run(db, row, payload)
@@ -455,6 +488,7 @@ def record_failure(job_id, exc):
         else:
             payload["state"] = "CANCELLED" if payload.get("cancel_requested") else "MODEL_FAILED"
             payload["error"] = {"code": code, "message": message}
+            payload.setdefault('model_progress', {}).update(phase='FAILED', label='识别未完成', updated_at=now().isoformat())
         event(db, row, payload, "run.failed", job.requirement_id, {"code": code, "message": message})
         save_run(db, row, payload); db.commit()
     log.warning("Agent job failed: %s %s", job_id, type(exc).__name__)
