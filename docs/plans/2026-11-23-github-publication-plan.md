@@ -2,6 +2,8 @@
 
 日期：2026-11-23。设计：[发布与模块维护设计](../design/2026-11-23-github-publication-design.md)。
 
+状态：已完成；验证及发布结果见[发布报告](../reports/2026-11-23-github-publication.md)。
+
 1. 从 independent-platform 当前工作树导入后端、前端、infra、脚本与第三方许可，保存来源散列清单；不导入凭据、运行数据和历史 Git 对象。
 2. 建立八模块清单、模块 README、目录约定、贡献说明、设计/计划/报告和唯一 TODO 入口。
 3. 编写部署 README、功能手册、架构、DataWorks 能力映射、配置/恢复文档，核对实际代码能力。

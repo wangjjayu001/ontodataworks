@@ -8,7 +8,7 @@
 
 | 检查 | 实际结果 |
 | --- | --- |
-| 仓库文件、模块归属、生成漂移、JSON/YAML、文档链接 | 通过；八个模块，115 个本地文档链接（后续文档调整可能增加） |
+| 仓库文件、模块归属、生成漂移、JSON/YAML、文档链接 | 通过；八个模块；发布前共 117 个本地文档链接，后续文档增加将重新检查 |
 | 后端既有离线回归 | 11 组、105 项通过；Python 3.12.14、临时 SQLite 与内存 DuckDB 1.4.2，无真实模型/数仓 |
 | 前端既有测试与构建 | 32 项通过；Vite 5.4.11 构建通过，使用本机捆绑 Node/pnpm；CI 使用 Node 22 / pnpm 10.11.0 |
 | Python 与 PowerShell 静态检查 | 后端/工具 compileall、管理脚本解析通过 |
@@ -28,4 +28,8 @@
 
 ## GitHub
 
-目标仓库：[wangjjayu001/ontodataworks](https://github.com/wangjjayu001/ontodataworks)。提交后核对远端源码、CI、标签、分支维护设置及首次源码 Release；最终状态以 GitHub 检查记录为准。
+公开仓库：[wangjjayu001/ontodataworks](https://github.com/wangjjayu001/ontodataworks)。首次源码和工程化提交已推送；[首次 GitHub CI](https://github.com/wangjjayu001/ontodataworks/actions/runs/45122592269) 的 repository/frontend 两个 job 均通过。已配置 13 个检索 topics、八个 module 标签、CODEOWNERS、自动路径标签和 PR/Issue 模板。后续文档提交也由相同 CI 验证。
+
+源码 Release 说明见[v1.1.0](../releases/v1.1.0.md)，[GitHub Release](https://github.com/wangjjayu001/ontodataworks/releases/tag/v1.1.0)。首次版本提供源码，不附带数据库、模型凭据或原电脑构建产物。
+
+隔离测试容器和网络已移除，测试卷与本机随机配置保留在独立测试范围供复查；未删除旧数据卷。旧 independent-workbench 服务仍运行。
