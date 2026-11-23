@@ -1,0 +1,4134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qdata:semantic-authority:1.0.0",
+  "title": "semantic-authority",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "semantic-contract/1.0.0"
+    },
+    "hash_profile": {
+      "const": "canonical-json-v1"
+    },
+    "package_kind": {
+      "enum": [
+        "DRAFT_EXPORT",
+        "RELEASE_CONTENT"
+      ]
+    },
+    "workspace_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "catalog_snapshot": {
+      "$ref": "#/$defs/catalog_snapshot"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/asset_revision"
+      },
+      "minItems": 1
+    },
+    "governance_records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/governance_record"
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "hash_profile",
+    "package_kind",
+    "workspace_id",
+    "catalog_snapshot",
+    "assets",
+    "governance_records"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "asset_ref": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "enum": [
+            "domain",
+            "term",
+            "entity",
+            "dimension",
+            "relation",
+            "metric",
+            "binding",
+            "source",
+            "claim",
+            "evidence"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "dataset_ref": {
+      "type": "object",
+      "properties": {
+        "catalog_snapshot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "datasource_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "catalog_snapshot_id",
+        "datasource_id",
+        "dataset_id"
+      ],
+      "additionalProperties": false
+    },
+    "field_ref": {
+      "type": "object",
+      "properties": {
+        "catalog_snapshot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "datasource_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "field_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "catalog_snapshot_id",
+        "datasource_id",
+        "dataset_id",
+        "field_id"
+      ],
+      "additionalProperties": false
+    },
+    "property_ref": {
+      "type": "object",
+      "properties": {
+        "entity_ref": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/asset_ref"
+            },
+            {
+              "properties": {
+                "asset_type": {
+                  "const": "entity"
+                }
+              }
+            }
+          ]
+        },
+        "property_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "entity_ref",
+        "property_id"
+      ],
+      "additionalProperties": false
+    },
+    "validity": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "policy_ref": {
+      "type": "object",
+      "properties": {
+        "policy_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolution": {
+          "enum": [
+            "UNKNOWN",
+            "RESOLVED"
+          ]
+        }
+      },
+      "required": [
+        "policy_id",
+        "revision",
+        "resolution"
+      ],
+      "additionalProperties": false
+    },
+    "alias": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "EXACT_ALIAS",
+            "ABBREVIATION"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "text",
+        "language",
+        "kind",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "unit": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "COUNT",
+            "CURRENCY",
+            "RATIO",
+            "NUMBER",
+            "DURATION",
+            "UNKNOWN"
+          ]
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authority": {
+          "enum": [
+            "CONFIRMED",
+            "SYNTHETIC_ONLY",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "code",
+        "currency",
+        "scale",
+        "authority"
+      ],
+      "additionalProperties": false
+    },
+    "time_policy": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "EVENT_RANGE",
+            "SNAPSHOT_DAY",
+            "BUSINESS_DATE",
+            "PROCESSING_TIME",
+            "UNKNOWN"
+          ]
+        },
+        "property_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/property_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timezone": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interval": {
+          "enum": [
+            "[start,end)",
+            "EXACT_DAY",
+            "UNKNOWN"
+          ]
+        },
+        "history_policy": {
+          "enum": [
+            "CURRENT",
+            "AS_OF",
+            "SCD2",
+            "IMMUTABLE",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "property_ref",
+        "timezone",
+        "interval",
+        "history_policy"
+      ],
+      "additionalProperties": false
+    },
+    "expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "property"
+            },
+            "property_ref": {
+              "$ref": "#/$defs/property_ref"
+            }
+          },
+          "required": [
+            "op",
+            "property_ref"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "field"
+            },
+            "field_ref": {
+              "$ref": "#/$defs/field_ref"
+            }
+          },
+          "required": [
+            "op",
+            "field_ref"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "metric"
+            },
+            "metric_ref": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "metric"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "metric_ref"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "literal"
+            },
+            "value": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "parameter"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "data_type": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "op",
+            "name",
+            "data_type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "call"
+            },
+            "function": {
+              "enum": [
+                "count",
+                "count_distinct",
+                "sum",
+                "avg",
+                "min",
+                "max",
+                "coalesce",
+                "date_trunc"
+              ]
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/expression"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "op",
+            "function",
+            "args"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "binary"
+            },
+            "operator": {
+              "enum": [
+                "+",
+                "-",
+                "*",
+                "/",
+                "=",
+                "!=",
+                "<",
+                "<=",
+                ">",
+                ">=",
+                "and",
+                "or"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/expression"
+            },
+            "right": {
+              "$ref": "#/$defs/expression"
+            }
+          },
+          "required": [
+            "op",
+            "operator",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "grain": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "property_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/property_ref"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "description",
+        "property_refs"
+      ],
+      "additionalProperties": false
+    },
+    "locator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "JSON_POINTER"
+            },
+            "pointer": {
+              "type": "string",
+              "pattern": "^(?:/(?:[^~/]|~[01])*)*$"
+            }
+          },
+          "required": [
+            "kind",
+            "pointer"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "LINE_RANGE"
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "kind",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "TEXT_SPAN"
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "kind",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "property": {
+      "type": "object",
+      "properties": {
+        "property_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semantic_role": {
+          "enum": [
+            "IDENTIFIER",
+            "ATTRIBUTE",
+            "MEASURE",
+            "STATUS",
+            "EVENT_TIME",
+            "SNAPSHOT_DATE",
+            "BUSINESS_DATE",
+            "PROCESSING_TIME"
+          ]
+        },
+        "nullable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/unit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "property_id",
+        "name",
+        "data_type",
+        "semantic_role",
+        "nullable",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "join": {
+      "type": "object",
+      "properties": {
+        "join_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logical_relation_ref": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/asset_ref"
+            },
+            {
+              "properties": {
+                "asset_type": {
+                  "const": "relation"
+                }
+              }
+            }
+          ]
+        },
+        "from_dataset_ref": {
+          "$ref": "#/$defs/dataset_ref"
+        },
+        "to_dataset_ref": {
+          "$ref": "#/$defs/dataset_ref"
+        },
+        "key_pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "$ref": "#/$defs/field_ref"
+              },
+              "to": {
+                "$ref": "#/$defs/field_ref"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "join_type": {
+          "enum": [
+            "INNER",
+            "LEFT"
+          ]
+        },
+        "expected_cardinality": {
+          "enum": [
+            "1:1",
+            "N:1",
+            "1:N",
+            "N:M",
+            "UNKNOWN"
+          ]
+        },
+        "fanout_strategy": {
+          "enum": [
+            "REJECT",
+            "PREAGGREGATE",
+            "APPROVED_ALLOCATION",
+            "UNKNOWN"
+          ]
+        },
+        "allocation_rule_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/asset_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "null_key_policy": {
+          "enum": [
+            "DROP",
+            "KEEP",
+            "ERROR",
+            "UNKNOWN"
+          ]
+        },
+        "temporal_condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "equivalence_evidence_refs": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/asset_ref"
+              },
+              {
+                "properties": {
+                  "asset_type": {
+                    "const": "evidence"
+                  }
+                }
+              }
+            ]
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "join_id",
+        "logical_relation_ref",
+        "from_dataset_ref",
+        "to_dataset_ref",
+        "key_pairs",
+        "join_type",
+        "expected_cardinality",
+        "fanout_strategy",
+        "allocation_rule_ref",
+        "null_key_policy",
+        "temporal_condition",
+        "equivalence_evidence_refs"
+      ],
+      "additionalProperties": false
+    },
+    "dimension_implementation": {
+      "type": "object",
+      "properties": {
+        "dimension_ref": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/asset_ref"
+            },
+            {
+              "properties": {
+                "asset_type": {
+                  "const": "dimension"
+                }
+              }
+            }
+          ]
+        },
+        "expression": {
+          "$ref": "#/$defs/expression"
+        },
+        "required_join_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "required_field_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field_ref"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "dimension_ref",
+        "expression",
+        "required_join_ids",
+        "required_field_refs"
+      ],
+      "additionalProperties": false
+    },
+    "domain_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "domain"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "parent_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope_notes": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "parent_ref",
+            "scope_notes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "term_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "term"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "target_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/asset_ref"
+              },
+              "minItems": 1
+            },
+            "target_relation": {
+              "enum": [
+                "EQUIVALENT",
+                "BROADER",
+                "NARROWER",
+                "RELATED",
+                "AMBIGUOUS"
+              ]
+            },
+            "excluded_meanings": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "target_refs",
+            "target_relation",
+            "excluded_meanings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "entity_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "entity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "ENTITY",
+                "EVENT"
+              ]
+            },
+            "properties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/property"
+              },
+              "minItems": 1
+            },
+            "business_key": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "grain": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "properties",
+            "business_key",
+            "grain"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "dimension_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "dimension"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "entity_ref": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "entity"
+                    }
+                  }
+                }
+              ]
+            },
+            "property_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "value_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "null_member": {
+              "enum": [
+                "UNKNOWN_BUCKET",
+                "EXCLUDE",
+                "ERROR",
+                "UNKNOWN"
+              ]
+            },
+            "parent_dimension_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "dimension"
+                      }
+                    }
+                  }
+                ]
+              },
+              "minItems": 0
+            },
+            "value_dictionary_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "history_policy": {
+              "enum": [
+                "CURRENT",
+                "AS_OF",
+                "SCD2",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "entity_ref",
+            "property_id",
+            "value_type",
+            "null_member",
+            "parent_dimension_refs",
+            "value_dictionary_ref",
+            "history_policy"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "relation_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "relation"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "from_entity_ref": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "entity"
+                    }
+                  }
+                }
+              ]
+            },
+            "to_entity_ref": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "entity"
+                    }
+                  }
+                }
+              ]
+            },
+            "predicate": {
+              "type": "string",
+              "minLength": 1
+            },
+            "from_role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "to_role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cardinality": {
+              "enum": [
+                "1:1",
+                "1:N",
+                "N:1",
+                "N:M",
+                "UNKNOWN"
+              ]
+            },
+            "logical_key_pairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "$ref": "#/$defs/property_ref"
+                  },
+                  "to": {
+                    "$ref": "#/$defs/property_ref"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "from_entity_ref",
+            "to_entity_ref",
+            "predicate",
+            "from_role",
+            "to_role",
+            "cardinality",
+            "logical_key_pairs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "metric_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "metric"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "metric_kind": {
+              "enum": [
+                "ATOMIC",
+                "DERIVED"
+              ]
+            },
+            "entity_ref": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "entity"
+                    }
+                  }
+                }
+              ]
+            },
+            "grain": {
+              "$ref": "#/$defs/grain"
+            },
+            "expression": {
+              "$ref": "#/$defs/expression"
+            },
+            "depends_on_metric_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "metric"
+                      }
+                    }
+                  }
+                ]
+              },
+              "minItems": 0
+            },
+            "distinct_property_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/property_ref"
+              },
+              "minItems": 0
+            },
+            "default_filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/expression"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "allowed_dimension_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "dimension"
+                      }
+                    }
+                  }
+                ]
+              },
+              "minItems": 0
+            },
+            "forbidden_dimension_sets": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                "minItems": 2
+              },
+              "minItems": 0
+            },
+            "max_dimensions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "time_policy": {
+              "$ref": "#/$defs/time_policy"
+            },
+            "unit": {
+              "$ref": "#/$defs/unit"
+            },
+            "additivity": {
+              "type": "object",
+              "properties": {
+                "across_time": {
+                  "enum": [
+                    "ADDITIVE",
+                    "NON_ADDITIVE",
+                    "SEMI_ADDITIVE",
+                    "UNKNOWN"
+                  ]
+                },
+                "across_dimensions": {
+                  "enum": [
+                    "ADDITIVE",
+                    "NON_ADDITIVE",
+                    "SEMI_ADDITIVE",
+                    "UNKNOWN"
+                  ]
+                }
+              },
+              "required": [
+                "across_time",
+                "across_dimensions"
+              ],
+              "additionalProperties": false
+            },
+            "null_policy": {
+              "enum": [
+                "REJECT_ROW_AND_WARN",
+                "IGNORE",
+                "PROPAGATE",
+                "UNKNOWN"
+              ]
+            },
+            "empty_result_policy": {
+              "enum": [
+                "NO_DATA",
+                "ZERO_IF_COMPLETE",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "metric_kind",
+            "entity_ref",
+            "grain",
+            "expression",
+            "depends_on_metric_refs",
+            "distinct_property_refs",
+            "default_filter",
+            "allowed_dimension_refs",
+            "forbidden_dimension_sets",
+            "max_dimensions",
+            "time_policy",
+            "unit",
+            "additivity",
+            "null_policy",
+            "empty_result_policy"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "binding_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "binding"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "metric_ref": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "metric"
+                    }
+                  }
+                }
+              ]
+            },
+            "base_dataset_ref": {
+              "$ref": "#/$defs/dataset_ref"
+            },
+            "calculation": {
+              "$ref": "#/$defs/expression"
+            },
+            "property_mappings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "property_ref": {
+                    "$ref": "#/$defs/property_ref"
+                  },
+                  "expression": {
+                    "$ref": "#/$defs/expression"
+                  }
+                },
+                "required": [
+                  "property_ref",
+                  "expression"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            },
+            "physical_grain": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "key_field_refs": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/field_ref"
+                  },
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "description",
+                "key_field_refs"
+              ],
+              "additionalProperties": false
+            },
+            "base_join_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 0
+            },
+            "joins": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/join"
+              },
+              "minItems": 0
+            },
+            "dimension_implementations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/dimension_implementation"
+              },
+              "minItems": 0
+            },
+            "base_filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/expression"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time_field_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/field_ref"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "partition_field_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/field_ref"
+              },
+              "minItems": 0
+            },
+            "coverage": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "end_exclusive": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "data_as_of": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "evidence_refs": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  "minItems": 0
+                }
+              },
+              "required": [
+                "start",
+                "end_exclusive",
+                "data_as_of",
+                "evidence_refs"
+              ],
+              "additionalProperties": false
+            },
+            "freshness_sla_minutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "verification_rule_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "applicability": {
+              "type": "object",
+              "properties": {
+                "scope_filter": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/expression"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "scope_filter",
+                "description"
+              ],
+              "additionalProperties": false
+            },
+            "parameter_bindings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "data_type": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "enum": [
+                      "INTENT_TIME_START",
+                      "INTENT_TIME_END",
+                      "INTENT_SNAPSHOT_DATE",
+                      "INTENT_FILTER"
+                    ]
+                  },
+                  "required": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "data_type",
+                  "source",
+                  "required"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "metric_ref",
+            "base_dataset_ref",
+            "calculation",
+            "property_mappings",
+            "physical_grain",
+            "base_join_ids",
+            "joins",
+            "dimension_implementations",
+            "base_filter",
+            "time_field_ref",
+            "partition_field_refs",
+            "coverage",
+            "freshness_sla_minutes",
+            "verification_rule_ids",
+            "applicability",
+            "parameter_bindings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "source_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "source"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "source_kind": {
+              "enum": [
+                "BUSINESS_SPEC",
+                "CATALOG",
+                "SQL",
+                "TECHNICAL_QA",
+                "FEEDBACK"
+              ]
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "content_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "classification": {
+              "enum": [
+                "PUBLIC",
+                "INTERNAL",
+                "SENSITIVE"
+              ]
+            },
+            "authority": {
+              "enum": [
+                "BUSINESS_APPROVED",
+                "TECHNICAL_ONLY",
+                "UNREVIEWED"
+              ]
+            }
+          },
+          "required": [
+            "source_kind",
+            "uri",
+            "source_revision",
+            "content_sha256",
+            "classification",
+            "authority"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "claim_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "claim"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "subject_ref": {
+              "$ref": "#/$defs/asset_ref"
+            },
+            "claim_kind": {
+              "enum": [
+                "BUSINESS_DEFINITION",
+                "MAPPING_ASSERTION",
+                "TECHNICAL_OBSERVATION"
+              ]
+            },
+            "statement": {
+              "type": "string",
+              "minLength": 1
+            },
+            "condition": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/expression"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "evidence_links": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "evidence_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "#/$defs/asset_ref"
+                      },
+                      {
+                        "properties": {
+                          "asset_type": {
+                            "const": "evidence"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "stance": {
+                    "enum": [
+                      "SUPPORT",
+                      "REFUTE"
+                    ]
+                  }
+                },
+                "required": [
+                  "evidence_ref",
+                  "stance"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "subject_ref",
+            "claim_kind",
+            "statement",
+            "condition",
+            "evidence_links"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "evidence_revision": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_type": {
+          "const": "evidence"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "domain_ref": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "domain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "source"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "claim"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/asset_ref"
+                  },
+                  {
+                    "properties": {
+                      "asset_type": {
+                        "const": "evidence"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "source_ref": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/asset_ref"
+                },
+                {
+                  "properties": {
+                    "asset_type": {
+                      "const": "source"
+                    }
+                  }
+                }
+              ]
+            },
+            "locator": {
+              "$ref": "#/$defs/locator"
+            },
+            "excerpt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fragment_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "evidence_kind": {
+              "enum": [
+                "BUSINESS_TEXT",
+                "TECHNICAL_QA",
+                "SQL_LINEAGE",
+                "CATALOG_OBSERVATION"
+              ]
+            },
+            "observed_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "assertion": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "source_ref",
+            "locator",
+            "excerpt",
+            "fragment_sha256",
+            "evidence_kind",
+            "observed_at",
+            "assertion"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "workspace_id",
+        "asset_id",
+        "asset_type",
+        "revision",
+        "name",
+        "definition",
+        "domain_ref",
+        "aliases",
+        "owner_ids",
+        "steward_ids",
+        "validity",
+        "provenance_refs",
+        "policy_ref",
+        "spec"
+      ],
+      "additionalProperties": false
+    },
+    "asset_revision": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/domain_revision"
+        },
+        {
+          "$ref": "#/$defs/term_revision"
+        },
+        {
+          "$ref": "#/$defs/entity_revision"
+        },
+        {
+          "$ref": "#/$defs/dimension_revision"
+        },
+        {
+          "$ref": "#/$defs/relation_revision"
+        },
+        {
+          "$ref": "#/$defs/metric_revision"
+        },
+        {
+          "$ref": "#/$defs/binding_revision"
+        },
+        {
+          "$ref": "#/$defs/source_revision"
+        },
+        {
+          "$ref": "#/$defs/claim_revision"
+        },
+        {
+          "$ref": "#/$defs/evidence_revision"
+        }
+      ]
+    },
+    "catalog_field": {
+      "type": "object",
+      "properties": {
+        "field_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nullable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "semantic_role": {
+          "enum": [
+            "IDENTIFIER",
+            "ATTRIBUTE",
+            "MEASURE",
+            "STATUS",
+            "EVENT_TIME",
+            "SNAPSHOT_DATE",
+            "BUSINESS_DATE",
+            "PROCESSING_TIME",
+            "UNKNOWN"
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/unit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "classification": {
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "UNKNOWN"
+          ]
+        },
+        "business_definition": {
+          "$ref": "#/$defs/field_definition"
+        }
+      },
+      "required": [
+        "field_id",
+        "name",
+        "data_type",
+        "nullable",
+        "semantic_role",
+        "unit",
+        "classification",
+        "business_definition"
+      ],
+      "additionalProperties": false
+    },
+    "field_definition": {
+      "type": "object",
+      "properties": {
+        "name_zh": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "definition": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          },
+          "minItems": 0
+        },
+        "grain": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "legacy_unit_text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "steward_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "quality_rule_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "provenance_refs": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/asset_ref"
+              },
+              {
+                "properties": {
+                  "asset_type": {
+                    "const": "source"
+                  }
+                }
+              }
+            ]
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        }
+      },
+      "required": [
+        "name_zh",
+        "definition",
+        "aliases",
+        "grain",
+        "legacy_unit_text",
+        "owner_ids",
+        "steward_ids",
+        "quality_rule_refs",
+        "provenance_refs",
+        "policy_ref"
+      ],
+      "additionalProperties": false
+    },
+    "key_constraint": {
+      "type": "object",
+      "properties": {
+        "constraint_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "PRIMARY_KEY",
+            "UNIQUE",
+            "FOREIGN_KEY"
+          ]
+        },
+        "field_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "target_dataset_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dataset_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_field_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "observed_status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "required": [
+        "constraint_id",
+        "kind",
+        "field_ids",
+        "target_dataset_ref",
+        "target_field_ids",
+        "observed_status"
+      ],
+      "additionalProperties": false
+    },
+    "dataset": {
+      "type": "object",
+      "properties": {
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "datasource_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "connector_kind": {
+          "enum": [
+            "LOCAL_FIXTURE",
+            "POSTGRESQL"
+          ]
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "physical_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logical_locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schema_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "fingerprint_algorithm": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/catalog_field"
+          },
+          "minItems": 1
+        },
+        "key_constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/key_constraint"
+          },
+          "minItems": 0
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "constraints_state": {
+          "enum": [
+            "UNKNOWN",
+            "DECLARED",
+            "VERIFIED"
+          ]
+        }
+      },
+      "required": [
+        "dataset_id",
+        "datasource_id",
+        "connector_kind",
+        "namespace",
+        "physical_name",
+        "logical_locator",
+        "schema_fingerprint",
+        "fingerprint_algorithm",
+        "fields",
+        "key_constraints",
+        "policy_ref",
+        "constraints_state"
+      ],
+      "additionalProperties": false
+    },
+    "catalog_snapshot": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "catalog_snapshot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dataset"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "workspace_id",
+        "catalog_snapshot_id",
+        "source_revision",
+        "datasets"
+      ],
+      "additionalProperties": false
+    },
+    "control_ref": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "content_hash"
+      ],
+      "additionalProperties": false
+    },
+    "governance_record": {
+      "type": "object",
+      "properties": {
+        "asset_ref": {
+          "$ref": "#/$defs/asset_ref"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "dependency_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "workflow_state": {
+          "enum": [
+            "DRAFT",
+            "IN_REVIEW",
+            "APPROVED",
+            "REJECTED",
+            "WITHDRAWN"
+          ]
+        },
+        "validation_state": {
+          "enum": [
+            "NOT_RUN",
+            "RUNNING",
+            "PASS",
+            "FAIL",
+            "UNKNOWN"
+          ]
+        },
+        "record_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "issue_codes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "asset_ref",
+        "content_hash",
+        "dependency_hash",
+        "workflow_state",
+        "validation_state",
+        "record_version",
+        "issue_codes"
+      ],
+      "additionalProperties": false
+    },
+    "verification_receipt": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "target_ref": {
+          "$ref": "#/$defs/asset_ref"
+        },
+        "target_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "rule_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outcome": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNKNOWN",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/asset_ref"
+          },
+          "minItems": 0
+        },
+        "catalog_snapshot_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage_description": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "workspace_id",
+        "target_ref",
+        "target_hash",
+        "rule_id",
+        "rule_revision",
+        "outcome",
+        "reason",
+        "evidence_refs",
+        "catalog_snapshot_ids",
+        "observed_at",
+        "expires_at",
+        "coverage_description"
+      ],
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "target_ref": {
+          "$ref": "#/$defs/asset_ref"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "dependency_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "reviewer_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewer_role": {
+          "enum": [
+            "BUSINESS_OWNER",
+            "DATA_OWNER",
+            "PUBLISHER"
+          ]
+        },
+        "decision": {
+          "enum": [
+            "APPROVE",
+            "REJECT",
+            "WITHDRAW"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decided_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "workspace_id",
+        "target_ref",
+        "content_hash",
+        "dependency_hash",
+        "reviewer_id",
+        "reviewer_role",
+        "decision",
+        "reason",
+        "decided_at"
+      ],
+      "additionalProperties": false
+    },
+    "release": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schema_version": {
+          "const": "semantic-contract/1.0.0"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "asset_ref": {
+                "$ref": "#/$defs/asset_ref"
+              },
+              "content_hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "asset_ref",
+              "content_hash"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "catalog_snapshots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/control_ref"
+          },
+          "minItems": 1
+        },
+        "approval_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/control_ref"
+          },
+          "minItems": 1
+        },
+        "verification_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/control_ref"
+          },
+          "minItems": 1
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "workspace_id",
+        "schema_version",
+        "items",
+        "catalog_snapshots",
+        "approval_refs",
+        "verification_refs",
+        "validity",
+        "created_at"
+      ],
+      "additionalProperties": false
+    },
+    "index_snapshot": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "release_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "projection_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "analyzer_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "embedding_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "embedding_weight_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "fusion_config_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "builder_code_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "index_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "channel": {
+                "enum": [
+                  "EXACT",
+                  "BM25",
+                  "VECTOR",
+                  "GRAPH"
+                ]
+              },
+              "content_hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "channel",
+              "content_hash"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "validation_receipt_ref": {
+          "$ref": "#/$defs/control_ref"
+        },
+        "index_build_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "workspace_id",
+        "release_id",
+        "release_hash",
+        "projection_version",
+        "analyzer_version",
+        "embedding_model",
+        "embedding_weight_hash",
+        "fusion_config_hash",
+        "builder_code_hash",
+        "index_files",
+        "validation_receipt_ref",
+        "index_build_id"
+      ],
+      "additionalProperties": false
+    },
+    "deployment": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "release_ref": {
+          "$ref": "#/$defs/control_ref"
+        },
+        "index_snapshot_ref": {
+          "$ref": "#/$defs/control_ref"
+        },
+        "pointer_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "activated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "actor_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "workspace_id",
+        "release_ref",
+        "index_snapshot_ref",
+        "pointer_version",
+        "activated_at",
+        "actor_id"
+      ],
+      "additionalProperties": false
+    },
+    "index_validation_receipt": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "index_build_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "projection_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "channel": {
+                "enum": [
+                  "EXACT",
+                  "BM25",
+                  "VECTOR",
+                  "GRAPH"
+                ]
+              },
+              "content_hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "channel",
+              "content_hash"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rule_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "enum": [
+                  "PASS",
+                  "FAIL",
+                  "UNKNOWN"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "rule_id",
+              "outcome",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "workspace_id",
+        "index_build_id",
+        "release_id",
+        "release_hash",
+        "projection_version",
+        "index_files",
+        "checks",
+        "observed_at"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

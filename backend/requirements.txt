@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+cryptography==44.0.0
+sqlglot==26.33.0
+jsonschema==4.26.0

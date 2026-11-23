@@ -1,0 +1,36 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+local/
+backups/
+scratch/
+evidence/
+*.token
+*.pem
+*.key
+auth.json
+credentials.json
+
+# Dependencies and generated files
+node_modules/
+dist/
+.check-dist/
+.venv*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.dump
+*.db
+*.sqlite*
+*.duckdb*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
