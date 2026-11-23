@@ -42,14 +42,14 @@ if ($Action -in @('Initialize','Start','Restart')){
         Write-Output 'OntoDataWorks database initialized. Start with or without the model runtime.'
         exit 0
     }
-    if(-not $WithoutModel){
-        & (Join-Path $PSScriptRoot 'scripts\Start-CodexBridge.ps1')
-        if($LASTEXITCODE -ne 0){throw 'Codex bridge startup failed.'}
-    }
     if($Action -eq 'Restart'){
         # Stop dependents before the database; up waits for database/API health.
         & $workbenchDocker @workbenchArgs stop
         if($LASTEXITCODE -ne 0){throw 'Ordered service stop failed.'}
+    }
+    if(-not $WithoutModel){
+        & (Join-Path $PSScriptRoot 'scripts\Start-CodexBridge.ps1') -ReloadConfig:($Action -eq 'Restart')
+        if($LASTEXITCODE -ne 0){throw 'Codex bridge startup failed.'}
     }
     & $workbenchDocker @workbenchArgs up -d --wait --wait-timeout 180
     if($LASTEXITCODE -ne 0){throw 'Independent workbench startup failed. Retain volumes and inspect logs.'}

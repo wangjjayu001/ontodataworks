@@ -26,6 +26,7 @@ import uuid
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 from app.model_runtime import ModelRuntimeError, STAGE_SCHEMAS, canonical_hash, validate_output, MODEL_CONTRACT_VERSION, stage_schema_hashes
+from codex_cli_config import load_cli_configuration
 
 MAX_BODY = 32 * 1024
 MAX_RESPONSE = 256 * 1024
@@ -89,7 +90,8 @@ def stamp():
 
 
 class RpcSession:
-    def __init__(self, executable, workdir, timeout=135):
+    def __init__(self, executable, workdir, timeout=135, configuration=None):
+        self.configuration = configuration
         self.thread_id = None
         self.turn_id = None
         self.cancel_event = threading.Event()
@@ -105,8 +107,11 @@ class RpcSession:
         for feature in DISABLED_FEATURES:
             args.extend(["--disable", feature])
         args.extend(["-c", 'web_search="disabled"', "-c", 'approval_policy="never"', "-c", 'sandbox_mode="read-only"'])
+        if configuration:
+            args.extend(configuration.arguments)
         self.process = subprocess.Popen(args, cwd=workdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", bufsize=1,
+            env=configuration.session_environment(workdir) if configuration else None,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._read_error, daemon=True).start()
@@ -178,6 +183,9 @@ class RpcSession:
     def initialize(self):
         result = self.rpc("initialize", {"clientInfo": {"name": "semantic-workbench-local", "title": "Local semantic validation", "version": "1.0.0"}, "capabilities": {"experimentalApi": True}})
         self.send({"method": "initialized", "params": {}})
+        if self.configuration and self.configuration.public["source"] == "cc-switch":
+            actual = self.rpc("config/read", {"includeLayers": False})
+            self.configuration.verify(actual.get("config", {}))
         return result
 
     def interrupt(self):
@@ -271,6 +279,7 @@ class Bridge:
         if len(self.token) < 32:
             raise RuntimeError("Bridge token must contain at least 32 characters")
         self.executable = executable
+        self.configuration = load_cli_configuration()
         self.cli_version = subprocess.check_output([executable, "--version"], text=True, encoding="utf-8").strip()
         self.catalog = None
         self.catalog_at = 0
@@ -282,7 +291,7 @@ class Bridge:
     def session(self, timeout=135):
         workdir = LOCAL / "codex-runtime" / ("step-" + uuid.uuid4().hex)
         workdir.mkdir(parents=True)
-        return RpcSession(self.executable, workdir, timeout), workdir
+        return RpcSession(self.executable, workdir, timeout, self.configuration), workdir
 
     def models(self):
         with self.catalog_lock:
@@ -303,8 +312,22 @@ class Bridge:
                 public = []
                 for m in models:
                     public.append({key: m.get(key) for key in ["id", "model", "displayName", "description", "isDefault", "supportedReasoningEfforts", "defaultReasoningEffort", "inputModalities", "serviceTiers", "defaultServiceTier"]})
-                self.catalog = {"catalog_version": canonical_hash(public), "updated_at": stamp(), "models": public,
+                configured_model = self.configuration.public.get("configured_model")
+                if configured_model:
+                    current = next((m for m in public if configured_model in {m.get("id"), m.get("model")}), None)
+                    if not current:
+                        raise ModelRuntimeError("MODEL_CONFIG_MODEL_UNAVAILABLE", "CC Switch 当前模型不在 CLI 可用目录中，请核对配置后重启", True)
+                    for model in public:
+                        model["isDefault"] = model is current
+                    effort = self.configuration.public.get("reasoning_effort")
+                    supported = [item.get("reasoningEffort") if isinstance(item, dict) else item for item in current.get("supportedReasoningEfforts", [])]
+                    if effort:
+                        if effort not in supported:
+                            raise ModelRuntimeError("MODEL_CONFIG_EFFORT_UNSUPPORTED", "CC Switch 当前推理强度不受所选模型支持，请核对配置", True)
+                        current["defaultReasoningEffort"] = effort
+                self.catalog = {"catalog_version": canonical_hash({"models": public, "configuration": self.configuration.public}), "updated_at": stamp(), "models": public,
                     "model_contract_version": MODEL_CONTRACT_VERSION, "stage_schema_hashes": stage_schema_hashes(),
+                    "runtime_configuration": self.configuration.public,
                     "source": "codex-app-server-model/list", "status": "available", "cli_version": self.cli_version,
                     "runtime_scope": "local_public_synthetic_only", "production_enabled": False}
                 self.catalog_at = time.monotonic()
@@ -361,7 +384,7 @@ class Bridge:
                 self.active[ident] = session
             session.initialize()
             result = session.turn(stage, payload, selection, workdir)
-            return {**result, "model_contract_version": MODEL_CONTRACT_VERSION, "request_id": ident, "cli_version": self.cli_version, "completed_at": stamp(), "catalog_version": selection["catalog_version"]}
+            return {**result, "model_contract_version": MODEL_CONTRACT_VERSION, "request_id": ident, "cli_version": self.cli_version, "completed_at": stamp(), "catalog_version": selection["catalog_version"], "runtime_configuration": self.configuration.public}
         finally:
             with self.active_lock:
                 if self.active.get(ident) is session:
@@ -411,7 +434,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             if self.path == "/health":
-                self.reply(200, {"status": "ok", "scope": "local_public_synthetic_only", "production_enabled": False})
+                with self.server.bridge.active_lock:
+                    active_requests = len(self.server.bridge.active)
+                self.reply(200, {"status": "ok", "scope": "local_public_synthetic_only", "production_enabled": False,
+                    "runtime_configuration": self.server.bridge.configuration.public, "active_requests": active_requests})
             elif self.path == "/models":
                 self.reply(200, self.server.bridge.models())
             else:

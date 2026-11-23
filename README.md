@@ -58,6 +58,8 @@ $env:ONTODATAWORKS_DOCKER = 'D:\Docker\resources\bin\docker.exe'
 
 完整模型模式：先确认 `codex --version` 与 CLI 认证可用，然后登记桥接所用解释器并启动。
 
+使用 CC Switch 时，启动桥接会读取当前选中的 Codex 服务商、模型与推理强度。以后在 CC Switch 切换配置，只需执行 `Manage-Workbench.ps1 -Action Restart`；重启会重新加载，细节见[CC Switch 配置说明](scripts/CODEX-RUNTIME.md#cc-switch-配置与重启)。
+
 ```powershell
 .\scripts\Start-CodexBridge.ps1 -PythonPath "$PWD\.venv\Scripts\python.exe"
 .\Manage-Workbench.ps1 -Action Start

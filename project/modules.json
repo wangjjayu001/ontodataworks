@@ -45,8 +45,8 @@
       "id": "agent",
       "title": "问数 Agent 与模型运行",
       "summary": "负责对话、逐需求项状态、澄清、固定语义引用、确定性规划、Gate、单次授权、取消和模型桥接。",
-      "paths": ["backend/app/agent*.py", "backend/app/model_runtime.py", "backend/app/query_provenance.py", "frontend/src/SmartQuery.jsx", "frontend/src/smart-query.css", "frontend/src/CodexModelPicker.jsx", "frontend/src/codex-models.json", "frontend/src/query*.js", "scripts/codex_bridge.py", "scripts/*CodexBridge.ps1", "scripts/CODEX-RUNTIME.md"],
-      "tests": ["scripts/test_agent*.py", "scripts/test_metadata_candidate_flow.py", "scripts/test_model_contract.py", "scripts/test_model_vocabulary.py", "frontend/tests/query*.mjs", "scripts/validate_agent_transport_live.py", "scripts/validate_model_runtime.py"],
+      "paths": ["backend/app/agent*.py", "backend/app/model_runtime.py", "backend/app/query_provenance.py", "frontend/src/SmartQuery.jsx", "frontend/src/smart-query.css", "frontend/src/CodexModelPicker.jsx", "frontend/src/codex-models.json", "frontend/src/query*.js", "scripts/codex_bridge.py", "scripts/codex_cli_config.py", "scripts/*CodexBridge.ps1", "scripts/CODEX-RUNTIME.md"],
+      "tests": ["scripts/test_agent*.py", "scripts/test_codex_cli_config.py", "scripts/test_metadata_candidate_flow.py", "scripts/test_model_contract.py", "scripts/test_model_vocabulary.py", "frontend/tests/query*.mjs", "scripts/validate_agent_transport_live.py", "scripts/validate_model_runtime.py"],
       "contracts": "模型目录/结构化意图、Run/Requirement/QueryFrame/CAS；意图和工具变化不得扩大当前本地公开/合成验证范围。"
     },
     {

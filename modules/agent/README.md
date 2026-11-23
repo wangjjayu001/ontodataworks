@@ -17,12 +17,14 @@ PR scope：`agent`；GitHub 标签：`module:agent`。
 - `frontend/src/codex-models.json`
 - `frontend/src/query*.js`
 - `scripts/codex_bridge.py`
+- `scripts/codex_cli_config.py`
 - `scripts/*CodexBridge.ps1`
 - `scripts/CODEX-RUNTIME.md`
 
 ## 现有验证入口
 
 - `scripts/test_agent*.py`
+- `scripts/test_codex_cli_config.py`
 - `scripts/test_metadata_candidate_flow.py`
 - `scripts/test_model_contract.py`
 - `scripts/test_model_vocabulary.py`

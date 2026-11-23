@@ -1,6 +1,7 @@
 param(
     [string]$PythonPath = "",
-    [int]$Port = 19191
+    [int]$Port = 19191,
+    [switch]$ReloadConfig
 )
 $ErrorActionPreference = 'Stop'
 $bridgeRoot = Split-Path -Parent $PSScriptRoot
@@ -16,7 +17,7 @@ if ($LASTEXITCODE -ne 0 -or ($bridgePythonCheck -join '').Trim() -ne 'True') {
     throw 'A working Python 3.12+ is required. Start once with -PythonPath pointing to the installed Python executable.'
 }
 $PythonPath | Set-Content -LiteralPath $bridgePythonFile
-$bridgeContractJson = & $PythonPath -c "import json,sys;sys.path.insert(0,'backend');from app.model_runtime import MODEL_CONTRACT_VERSION,stage_schema_hashes;print(json.dumps({'model_contract_version':MODEL_CONTRACT_VERSION,'stage_schema_hashes':stage_schema_hashes()}))"
+$bridgeContractJson = & $PythonPath -c "import json,sys;sys.path.insert(0,sys.argv[1]);from app.model_runtime import MODEL_CONTRACT_VERSION,stage_schema_hashes;print(json.dumps({'model_contract_version':MODEL_CONTRACT_VERSION,'stage_schema_hashes':stage_schema_hashes()}))" (Join-Path $bridgeRoot 'backend')
 if ($LASTEXITCODE -ne 0 -or -not $bridgeContractJson) {
     throw 'Could not read the backend model contract. Verify the selected Python environment.'
 }
@@ -52,9 +53,14 @@ if (Test-Path -LiteralPath $bridgePidFile) {
     $bridgePid = [int](Get-Content -LiteralPath $bridgePidFile)
     $bridgeExisting = Get-CimInstance Win32_Process -Filter "ProcessId=$bridgePid" -ErrorAction SilentlyContinue
     if ($bridgeExisting -and $bridgeExisting.CommandLine -like '*codex_bridge.py*') {
-        Wait-BridgeModels
-        Write-Output 'Codex bridge is already running and ready.'
-        exit 0
+        if($ReloadConfig){
+            & (Join-Path $PSScriptRoot 'Stop-CodexBridge.ps1')
+            if($LASTEXITCODE -ne 0){throw 'Could not stop the existing Codex bridge for configuration reload.'}
+        }else{
+            Wait-BridgeModels
+            Write-Output 'Codex bridge is already running and ready. Use -ReloadConfig to reload CC Switch settings.'
+            exit 0
+        }
     }
 }
 $bridgeProcess = Start-Process -FilePath $PythonPath -ArgumentList @('scripts/codex_bridge.py','--host','127.0.0.1','--port',"$Port") -WorkingDirectory $bridgeRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $bridgeLocal 'codex-bridge.stdout.log') -RedirectStandardError (Join-Path $bridgeLocal 'codex-bridge.stderr.log')
