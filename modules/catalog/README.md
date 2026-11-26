@@ -13,11 +13,19 @@ PR scope：`catalog`；GitHub 标签：`module:catalog`。
 - `backend/app/main.py`
 - `backend/app/db.py`
 - `frontend/src/main.jsx`
+- `backend/app/catalog_lineage.py`
+- `frontend/src/DataMap.jsx`
+- `frontend/src/CatalogLineage.jsx`
+- `frontend/src/catalogLineageModel.js`
+- `frontend/src/data-map.css`
 
 ## 现有验证入口
 
 - `scripts/validate_drift_and_readonly.py`
 - `scripts/validate_chinese_metadata.py`
+- `scripts/test_catalog_lineage.py`
+- `frontend/tests/catalog-lineage.test.mjs`
+- `scripts/validate_catalog_lineage_live.py`
 
 ## 接口与评审边界
 

@@ -383,7 +383,6 @@
       "required": [
         "kind",
         "property_ref",
-        "timezone",
         "interval",
         "history_policy"
       ],

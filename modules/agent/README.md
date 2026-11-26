@@ -10,22 +10,31 @@ PR scope：`agent`；GitHub 标签：`module:agent`。
 
 - `backend/app/agent*.py`
 - `backend/app/model_runtime.py`
+- `backend/app/query_provenance.py`
 - `frontend/src/SmartQuery.jsx`
+- `frontend/src/Query*.jsx`
 - `frontend/src/smart-query.css`
 - `frontend/src/CodexModelPicker.jsx`
 - `frontend/src/codex-models.json`
 - `frontend/src/query*.js`
 - `scripts/codex_bridge.py`
+- `scripts/codex_cli_config.py`
 - `scripts/*CodexBridge.ps1`
 - `scripts/CODEX-RUNTIME.md`
+- `frontend/src/useQueryStepScroll.js`
+- `frontend/src/queryStepScroll.js`
 
 ## 现有验证入口
 
 - `scripts/test_agent*.py`
+- `scripts/test_codex_cli_config.py`
+- `scripts/test_metadata_candidate_flow.py`
+- `scripts/test_model_contract.py`
 - `scripts/test_model_vocabulary.py`
 - `frontend/tests/query*.mjs`
 - `scripts/validate_agent_transport_live.py`
 - `scripts/validate_model_runtime.py`
+- `frontend/tests/query-step-scroll.test.mjs`
 
 ## 接口与评审边界
 

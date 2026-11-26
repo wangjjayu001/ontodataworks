@@ -16,6 +16,7 @@ PR scope：`platform`；GitHub 标签：`module:platform`。
 - `frontend/src/navigation.js`
 - `frontend/src/styles.css`
 - `frontend/public/*`
+- `frontend/src/WorkspaceUi.jsx`
 
 ## 现有验证入口
 

@@ -100,8 +100,9 @@ class SemanticIntegrity(unittest.TestCase):
         self.assertEqual(intent["timezone"], "SOURCE")
         compile_preview(self.contract, intent, self.bundle, "run_test", "req_test", {})
 
-    def test_unknown_timezone_blocks(self):
-        self.blocked(timezone="Asia/Shanghai")
+    def test_source_time_needs_no_timezone_setting(self):
+        _, preview = self.compile(timezone=None)
+        self.assertNotIn("AT TIME ZONE", preview["sql"])
 
     def test_unknown_business_negation_blocks(self):
         self.blocked(negative_terms=["不包括退款订单"])

@@ -22,6 +22,7 @@ from .warehouse import cipher, connect, inspect_catalog, read_query, table_refs,
 # Capture legacy tables before new modules register their explicit-migration tables.
 LEGACY_TABLES = list(Base.metadata.sorted_tables)
 from .semantic import router as semantic_router
+from .catalog_lineage import router as catalog_lineage_router
 from .agent import router as agent_router
 from .pipeline import router as pipeline_router, service_router
 from . import pipeline_extensions
@@ -45,9 +46,10 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="OntoDataWorks", version="1.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="OntoDataWorks", version="1.2.0", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.include_router(semantic_router)
 app.include_router(agent_router)
+app.include_router(catalog_lineage_router)
 app.include_router(pipeline_router)
 app.include_router(service_router)
 from .observability import install as install_observability

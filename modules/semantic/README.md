@@ -17,6 +17,7 @@ PR scope：`semantic`；GitHub 标签：`module:semantic`。
 
 ## 现有验证入口
 
+- `scripts/test_metadata_candidate_flow.py`
 - `scripts/test_semantic*.py`
 - `scripts/test_typed*.py`
 - `frontend/tests/semantic*.mjs`

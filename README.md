@@ -8,6 +8,8 @@
 
 本 README 专注源码部署与验证。当前基于 React 18、FastAPI、PostgreSQL；DataWorks 指能力体系参考，阿里云 DataWorks OpenAPI/SDK、MaxCompute 接口尚未接入，详见[能力映射](docs/features/dataworks-capabilities.md)。
 
+v1.2 新增数据地图表工作页、表级/字段级血缘和问数确认后的步骤定位；见[功能说明](docs/features/data-map-lineage.md)与[验收范围](docs/reports/2026-11-26-v12-data-map-lineage.md)。
+
 ## 1. 环境要求
 
 - Windows 10/11、PowerShell、Docker Desktop Linux 引擎及 Docker Compose 2.24.4+。
@@ -57,6 +59,8 @@ $env:ONTODATAWORKS_DOCKER = 'D:\Docker\resources\bin\docker.exe'
 ```
 
 完整模型模式：先确认 `codex --version` 与 CLI 认证可用，然后登记桥接所用解释器并启动。
+
+使用 CC Switch 时，启动桥接会读取当前选中的 Codex 服务商、模型与推理强度。以后在 CC Switch 切换配置，只需执行 `Manage-Workbench.ps1 -Action Restart`；重启会重新加载，细节见[CC Switch 配置说明](scripts/CODEX-RUNTIME.md#cc-switch-配置与重启)。
 
 ```powershell
 .\scripts\Start-CodexBridge.ps1 -PythonPath "$PWD\.venv\Scripts\python.exe"

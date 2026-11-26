@@ -13,6 +13,16 @@
 
 脚本以隐藏进程运行，默认只监听 `127.0.0.1:19191`。首次创建随机 token，保存在 Git 忽略的 `local/codex-bridge.token`；日志/PID 同样在 local 中。不复制/读取个人 auth.json，不打印 token。当前桌面 CLI 使用已有开发者认证，未来生产部署需要独立运行身份及受支持的凭据注入，不能把这个身份自动视为服务账号。
 
+## CC Switch 配置与重启
+
+安装 CC Switch 时，桥接启动会只读当前用户 `.cc-switch/settings.json` 的 `currentProviderCodex` 与 `cc-switch.db` 对应 Codex provider；没有本机选择时使用数据库唯一的 `is_current` 项。读取当前服务商、模型、推理强度和凭据，不修改 CC Switch 或个人 Codex 配置。自定义 CC Switch 目录可用 `ONTODATAWORKS_CC_SWITCH_HOME` 指定；指定位置无效或现有配置错误时明确失败，不能切换到另一服务商。
+
+自定义 API 服务商通过子进程专用环境变量传递密钥，使用临时 CLI home 和明确的 provider 覆盖；参数、日志和 HTTP 响应不包含密钥或认证内容。官方无 API key 的模式继续由 CLI 使用原有登录。启用了 CC Switch 实时代理接管时，必须验证个人实时配置指向登记的本地代理端口才可使用。
+
+在 CC Switch 切换服务商、模型或凭据后，执行 `./Manage-Workbench.ps1 -Action Restart`。该入口先有序停止工作台，再重启 bridge 读取最新配置，然后启动平台；单独重载模型可用 `./scripts/Start-CodexBridge.ps1 -ReloadConfig`。普通 `Start` 仍复用现有 bridge。bridge 在每次 CLI session 初始化后核对 config/read 的实际 provider、模型和推理强度；模型目录默认项跟随本次加载的有效模型。模型不在实际目录中或推理强度不受支持时明确报错。
+
+`/health`、`/models` 和调用回执中的 `runtime_configuration` 仅提供配置来源、服务商名称、配置模型、推理强度与加载时间。配置在一次 bridge 生命周期内固定；重新加载会刷新目录版本，已有页面可点击“刷新目录”重新选择。没有安装 CC Switch 的机器继续读取 Codex 原有配置。
+
 Docker Desktop 实测已有 API 容器可通过 `host.docker.internal:19191` 到达宿主 loopback，不需要监听 `0.0.0.0`。容器配置需要：
 
 ```text
@@ -27,16 +37,18 @@ CODEX_BRIDGE_TOKEN_FILE=/run/secrets/codex_bridge_token
 `backend/app/model_runtime.py` 提供：
 
 - `list_models()`：实时 app-server `model/list`，跟随分页，返回 models、catalog_version、updated_at、cli_version 和运行范围。
-- `parse_intent(text, context, model_selection, request_id, data_classification='synthetic')`：真实结构化意图；返回 `output={requirements,clarification_needed}` 和真实模型/轮次/usage 回执。每个 requirement 包含 metric_terms、dimension_terms、start/end_exclusive、timezone、time_event、filters、negative_terms、clarifications、depends_on_requirement_indexes。
+- `parse_intent(text, context, model_selection, request_id, data_classification='synthetic')`：真实结构化意图；返回 `output={requirements,clarification_needed}` 和真实模型/轮次/usage 回执。每个 requirement 包含 metric_terms、dimension_terms、start/end_exclusive、time_event、filters、negative_terms、clarifications、depends_on_requirement_indexes；日期直接使用源系统存储时间。
 - `refine_intent(text, context, model_selection, request_id)`：澄清只细化一个已有需求，返回 `output.intent`，不产生新的 requirements 数组。
-- `invoke('intent'|'clarification'|'explain', input_payload, registered_schema, selection, request_id, data_classification)`：三个登记阶段，不开放任意 Schema/任意 RPC。桥接与后端核对 `semantic-model/1.1` 和各阶段 Schema hash。
+- `invoke('intent'|'clarification'|'metadata_candidate'|'explain', input_payload, registered_schema, selection, request_id, data_classification)`：四个登记阶段，不开放任意 Schema/任意 RPC。桥接与后端核对 `semantic-model/1.3` 和各阶段 Schema hash。目录候选新增 `denominator_field_id` 与 `data_gaps`，支持经明确澄清的单表合计比值；字段和 SQL 仍由后端校验、编译。传输上限为 256 KiB，元数据上下文控制在 160 KB；截断时返回实际检查范围。
 - `cancel(request_id)`：登记模型取消；应用仍需等待真实 interrupted/failed/completed 终态并单独取消自己的查询/工具作业。
 
 目录选择只接受实际 model/list 中的模型、supportedReasoningEfforts 和 serviceTiers；目录 hash 过期需重选，不静默换模型。`outputSchema` 只约束最终助手消息，后端再次验证小型闭合 Schema，不把输出或文字“通过”视为业务核验。
 
+`parse_intent`、`refine_intent`、`derive_metadata_candidate` 支持内部 `progress_callback`。一次模型调用只提交一次 `/invoke`，等待期间按认证令牌读取 `/requests/{request_id}` 的连接/推理/输出校验阶段；不存在请求不返回输入或输出，阶段记录最多保留 256 条。API worker 把阶段写入运行事件，取消或终态之后的迟到更新会丢弃。前端每秒更新本地耗时，并通过现有运行轮询读取阶段。
+
 ## 运行约束与测试
 
-桥接只开放带服务 token 的 `/health /models /invoke /cancel`；拒绝浏览器 Origin、未知参数、过大请求及原始 command/fs/config/account RPC。每次模型步骤使用新临时 cwd 和 ephemeral thread，禁用已知 shell/exec/apps/plugins/browser/computer/image/multi-agent 等 feature；没有 dynamicTools，发现任何 server tool/approval 请求或工具 item 即拒绝/结束步骤。stderr 仅留内存，HTTP 错误不返回宿主路径或原始响应。
+桥接只开放带服务 token 的 `/health /models /invoke /cancel` 及请求阶段查询 `/requests/{request_id}`；拒绝浏览器 Origin、未知参数、过大请求及原始 command/fs/config/account RPC。每次模型步骤使用新临时 cwd 和 ephemeral thread，禁用已知 shell/exec/apps/plugins/browser/computer/image/multi-agent 等 feature；没有 dynamicTools，发现任何 server tool/approval 请求或工具 item 即拒绝/结束步骤。stderr 仅留内存，HTTP 错误不返回宿主路径或原始响应。
 
 上述 feature 和回调控制不等于已经证明 OS/网络隔离。服务仅接受 synthetic/public 分类，生产/机密分类失败关闭；调用方必须核实材料类别，不能仅把真实敏感材料改标签为 synthetic。当前工作空间真实查询使用本地合成数仓，**不向模型发送结果明细、结果数值、数据源凭据或用户文件**。模型仅解析问句；语义回源、规划、授权和执行在后端进行。
 

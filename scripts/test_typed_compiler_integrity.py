@@ -91,9 +91,13 @@ class TypedCompilerIntegrity(unittest.TestCase):
         self.metric["spec"]["time_policy"]["history_policy"]="SCD2"
         self.assert_rejected()
 
-    def test_known_timezone_not_ignored_on_naive_source(self):
+    def test_legacy_timezone_does_not_require_configuration_or_convert_source_time(self):
+        self.metric["spec"]["time_policy"].pop("timezone", None)
+        _, preview = self.compile()
+        self.assertNotIn("AT TIME ZONE", preview["sql"])
         self.metric["spec"]["time_policy"]["timezone"]="Asia/Shanghai"
-        self.assert_rejected()
+        _, preview = self.compile()
+        self.assertNotIn("AT TIME ZONE", preview["sql"])
 
     def test_derived_metric_dependency_filter_not_dropped(self):
         dependency=copy.deepcopy(self.metric)

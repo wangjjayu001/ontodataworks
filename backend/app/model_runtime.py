@@ -12,6 +12,8 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from urllib.parse import quote
 
 
 class ModelRuntimeError(RuntimeError):
@@ -26,7 +28,7 @@ def _nullable(kind="string"):
     return {"type": [kind, "null"]}
 
 
-MODEL_CONTRACT_VERSION = "semantic-model/1.1"
+MODEL_CONTRACT_VERSION = "semantic-model/1.3"
 PERIOD_SCHEMA = {"type": "object", "additionalProperties": False,
     "required": ["start", "end_exclusive"],
     "properties": {"start": _nullable(), "end_exclusive": _nullable()}}
@@ -47,14 +49,14 @@ INTENT_SCHEMA = {
             "type": "array", "minItems": 1, "maxItems": 8,
             "items": {
                 "type": "object", "additionalProperties": False,
-                "required": ["question", "metric_terms", "dimension_terms", "start", "end_exclusive", "timezone", "time_event", "filters", "negative_terms", "clarifications", "depends_on_requirement_indexes", "analysis"],
+                "required": ["question", "metric_terms", "dimension_terms", "start", "end_exclusive", "time_event", "filters", "negative_terms", "clarifications", "depends_on_requirement_indexes", "analysis"],
                 "properties": {
                     "question": {"type": "string"},
                     "metric_terms": {"type": "array", "items": {"type": "string"}},
                     "dimension_terms": {"type": "array", "items": {"type": "string"}},
                     "start": {**_nullable(), "description": "For a whole-day question use YYYY-MM-DD only. Never append a midnight time. Preserve explicit hour/minute requests instead of rounding them."},
                     "end_exclusive": {**_nullable(), "description": "Exclusive end. Whole-day questions use YYYY-MM-DD only, with no T00:00:00 suffix."},
-                    "timezone": _nullable(), "time_event": _nullable(),
+                    "time_event": _nullable(),
                     "analysis": ANALYSIS_SCHEMA,
                     "negative_terms": {"type": "array", "description": "Only business exclusions explicitly requested in input.question. System/context warnings, parser rules, unknown approval or timezone are never user business exclusions. Use [] when the user asks for no exclusion.", "items": {"type": "string"}},
                     "depends_on_requirement_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 7}},
@@ -84,6 +86,28 @@ CLARIFICATION_INTENT_SCHEMA = {
 CLARIFICATION_SCHEMA = {"type": "object", "additionalProperties": False,
     "required": ["intent"], "properties": {"intent": CLARIFICATION_INTENT_SCHEMA}}
 
+METADATA_FILTER_SCHEMA = {"type": "object", "additionalProperties": False,
+    "required": ["field_id", "operator", "value"],
+    "properties": {"field_id": {"type": "string"},
+        "operator": {"type": "string", "enum": ["="]}, "value": {"type": "string"}}}
+METADATA_CANDIDATE_PLAN_SCHEMA = {"type": ["object", "null"], "additionalProperties": False,
+    "required": ["name", "definition", "catalog_snapshot_id", "datasource_id", "dataset_id",
+        "operation", "measure_field_id", "denominator_field_id", "time_field_id", "dimension_field_ids", "filters",
+        "unit_label", "null_policy"],
+    "properties": {
+        "name": {"type": "string"}, "definition": {"type": "string"},
+        "catalog_snapshot_id": {"type": "string"}, "datasource_id": {"type": "string"},
+        "dataset_id": {"type": "string"},
+        "operation": {"type": "string", "enum": ["COUNT_ROWS", "COUNT_DISTINCT", "SUM", "AVG", "RATIO_SUM"]},
+        "measure_field_id": _nullable(), "denominator_field_id": _nullable(), "time_field_id": _nullable(),
+        "dimension_field_ids": {"type": "array", "maxItems": 2, "items": {"type": "string"}},
+        "filters": {"type": "array", "maxItems": 5, "items": METADATA_FILTER_SCHEMA},
+        "unit_label": {"type": "string"},
+        "null_policy": {"type": "string", "enum": ["EXCLUDE_AND_WARN"]}}}
+METADATA_CANDIDATE_SCHEMA = {"type": "object", "additionalProperties": False,
+    "required": ["candidate_plan", "data_gaps"],
+    "properties": {"candidate_plan": METADATA_CANDIDATE_PLAN_SCHEMA, "data_gaps": {"type":"array", "maxItems":8, "items":{"type":"string"}}}}
+
 EXPLAIN_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["summary", "limitations", "cited_ids"],
@@ -93,7 +117,8 @@ EXPLAIN_SCHEMA = {
         "cited_ids": {"type": "array", "items": {"type": "string"}},
     },
 }
-STAGE_SCHEMAS = {"intent": INTENT_SCHEMA, "clarification": CLARIFICATION_SCHEMA, "explain": EXPLAIN_SCHEMA}
+STAGE_SCHEMAS = {"intent": INTENT_SCHEMA, "clarification": CLARIFICATION_SCHEMA,
+    "metadata_candidate": METADATA_CANDIDATE_SCHEMA, "explain": EXPLAIN_SCHEMA}
 
 
 def canonical_hash(value):
@@ -174,7 +199,7 @@ def stage_schema_hashes():
     return {stage: canonical_hash(schema) for stage, schema in STAGE_SCHEMAS.items()}
 
 
-def invoke(stage, input_payload, output_schema=None, model_selection=None, request_id=None, data_classification="synthetic"):
+def invoke(stage, input_payload, output_schema=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
     if stage not in STAGE_SCHEMAS:
         raise ModelRuntimeError("MODEL_STAGE_UNSUPPORTED", "不支持的模型处理阶段")
     schema = STAGE_SCHEMAS[stage]
@@ -182,33 +207,62 @@ def invoke(stage, input_payload, output_schema=None, model_selection=None, reque
         raise ModelRuntimeError("MODEL_SCHEMA_UNSUPPORTED", "模型输出契约未登记")
     if data_classification not in {"synthetic", "public"}:
         raise ModelRuntimeError("MODEL_PRODUCTION_DISABLED", "当前模型运行仅开放本地合成或公开材料验证")
-    result = _bridge_call("/invoke", {
-        "request_id": request_id or "model_" + uuid.uuid4().hex,
+    ident = request_id or "model_" + uuid.uuid4().hex
+    body = {
+        "request_id": ident,
         "stage": stage, "input": input_payload,
         "model_contract_version": MODEL_CONTRACT_VERSION,
         "output_schema_hash": canonical_hash(schema),
         "model_selection": model_selection or {},
         "data_classification": data_classification,
-    })
+    }
+    if progress_callback is None:
+        result = _bridge_call('/invoke', body)
+    else:
+        last_phase = 'CONNECTING'
+        progress_callback(last_phase)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(_bridge_call, '/invoke', body)
+            while True:
+                try:
+                    result = pending.result(timeout=1)
+                    break
+                except FutureTimeout:
+                    try:
+                        status = _bridge_call('/requests/' + quote(ident, safe=':'), timeout=2)
+                    except ModelRuntimeError:
+                        continue
+                    phase = status.get('phase')
+                    if phase in {'CONNECTING', 'MODEL_RUNNING', 'VALIDATING'} and phase != last_phase:
+                        progress_callback(phase)
+                        last_phase = phase
+        progress_callback('VALIDATING')
     if result.get("model_contract_version") != MODEL_CONTRACT_VERSION or result.get("output_schema_hash") != canonical_hash(schema):
         raise ModelRuntimeError("MODEL_CONTRACT_MISMATCH", "模型CLI返回的数据契约与本次请求不一致", True)
     validate_output(result.get("output"), schema)
     return result
 
 
-def parse_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic"):
+def parse_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
     if not isinstance(text, str) or not text.strip() or len(text) > 6000:
         raise ModelRuntimeError("MODEL_INPUT_INVALID", "问题应为1至6000字文本")
     # Context must contain permitted semantic labels, not raw source rows or secrets.
-    result = invoke("intent", {"question": text, "context": context or {}}, INTENT_SCHEMA, model_selection, request_id, data_classification)
+    result = invoke("intent", {"question": text, "context": context or {}}, INTENT_SCHEMA, model_selection, request_id, data_classification, progress_callback=progress_callback)
     return result
 
 
-def refine_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic"):
+def refine_intent(text, context=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
     if not isinstance(text, str) or not text.strip() or len(text) > 6000:
         raise ModelRuntimeError("MODEL_INPUT_INVALID", "澄清输入应为1至6000字文本")
     return invoke("clarification", {"question": text, "context": context or {}},
-        CLARIFICATION_SCHEMA, model_selection, request_id, data_classification)
+        CLARIFICATION_SCHEMA, model_selection, request_id, data_classification, progress_callback=progress_callback)
+
+
+def derive_metadata_candidate(text, context=None, model_selection=None, request_id=None, data_classification="synthetic", progress_callback=None):
+    if not isinstance(text, str) or not text.strip() or len(text) > 6000:
+        raise ModelRuntimeError("MODEL_INPUT_INVALID", "候选口径输入应为1至6000字文本")
+    return invoke("metadata_candidate", {"question": text, "context": context or {}},
+        METADATA_CANDIDATE_SCHEMA, model_selection, request_id, data_classification, progress_callback=progress_callback)
 
 
 def cancel(request_id):

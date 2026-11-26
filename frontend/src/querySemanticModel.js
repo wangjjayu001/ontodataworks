@@ -13,7 +13,14 @@ export function semanticReferenceList(run){
 }
 
 export function snapshotIds(run){
- return [...new Set((run?.requirements||[]).flatMap(requirement=>(bundleOf(requirement)?.closure_refs||[]).filter(item=>item.kind==='FIELD'||item.kind==='DATASET').map(item=>item.target_ref?.catalog_snapshot_id)).filter(Boolean))];
+ return [...new Set((run?.requirements||[]).flatMap(requirement=>{
+  const bundle=bundleOf(requirement),discovery=requirement?.metadata_discovery;
+  return [
+   ...(bundle?.closure_refs||[]).filter(item=>item.kind==='FIELD'||item.kind==='DATASET').map(item=>item.target_ref),
+   ...(bundle?.candidates||[]).filter(item=>item.role==='field'||item.role==='dataset').map(item=>item.target_ref),
+   ...(discovery?.tables||[]).flatMap(table=>[table.dataset_ref,...(table.fields||[]).map(field=>({...table.dataset_ref,field_id:field.field_id}))])
+  ].map(ref=>ref?.catalog_snapshot_id);
+ }).filter(Boolean))];
 }
 
 export function buildPinnedContext(run,assetResponses=[],snapshots=[]){

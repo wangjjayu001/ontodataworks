@@ -31,6 +31,269 @@ class PlanningBlocked(Exception):
         super().__init__(message)
 
 
+def normalize_metadata_candidate(plan, discovery, intent, bundle, answers=()):
+    """Pin a model proposal to visible metadata; never accept model-authored SQL."""
+    if plan is None:
+        return None
+    if not isinstance(plan,dict) or not isinstance(discovery,dict):
+        raise PlanningBlocked("METADATA_CANDIDATE_INVALID","目录候选结构无效，请补充统计口径")
+    supplied_hash=discovery.get("content_hash")
+    discovery_content={k:v for k,v in discovery.items() if k!="content_hash"}
+    if not supplied_hash or canonical_hash(discovery_content)!=supplied_hash:
+        raise PlanningBlocked("METADATA_CANDIDATE_STALE","目录候选已变化，请重新检索")
+    if (discovery.get("release_id")!=bundle.get("release_id") or discovery.get("release_hash")!=bundle.get("release_hash")
+            or discovery.get("index_snapshot_id")!=bundle.get("index_snapshot_id")
+            or discovery.get("index_snapshot_hash")!=bundle.get("index_snapshot_hash")):
+        raise PlanningBlocked("METADATA_CANDIDATE_STALE","目录候选不属于本次固定发布版本")
+    if intent.get("negative_terms"):
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","当前目录候选无法证明排除条件，请补充明确字段和规则")
+    from .agent_time import infer_periods
+    periods=infer_periods(intent)
+    start,end=(periods[0]['start'],periods[0]['end_exclusive']) if periods else (intent.get('start'),intent.get('end_exclusive'))
+    try:
+        valid_range=all(isinstance(v,str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}",v) for v in (start,end)) and date.fromisoformat(start)<date.fromisoformat(end)
+    except (TypeError,ValueError):
+        valid_range=False
+    if not valid_range:
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","请先明确有效的左闭右开统计日期范围")
+    table=next((t for t in discovery.get("tables",[]) if
+        t.get("catalog_snapshot_id")==plan.get("catalog_snapshot_id") and
+        t.get("datasource_id")==str(plan.get("datasource_id")) and
+        t.get("dataset_id")==plan.get("dataset_id")),None)
+    if not table:
+        raise PlanningBlocked("METADATA_CANDIDATE_INVALID","候选数据表不在本次可访问目录中")
+    fields={f["field_id"]:f for f in table.get("fields",[]) if isinstance(f,dict) and isinstance(f.get("field_id"),str)}
+    operation=plan.get("operation")
+    if operation not in {"COUNT_ROWS","COUNT_DISTINCT","SUM","AVG","RATIO_SUM"}:
+        raise PlanningBlocked("METADATA_CANDIDATE_UNSUPPORTED","目录候选仅支持记录数、去重计数、求和或平均值")
+    measure_id=plan.get("measure_field_id")
+    measure=fields.get(measure_id) if measure_id else None
+    if operation=="COUNT_ROWS" and measure_id is not None:
+        raise PlanningBlocked("METADATA_CANDIDATE_INVALID","记录数候选不能额外绑定度量字段")
+    if operation!="COUNT_ROWS" and not measure:
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","请明确计算所用字段")
+    if operation=="COUNT_DISTINCT" and measure.get("semantic_role")!="IDENTIFIER" and not measure.get("is_primary"):
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","去重计数需要目录标记为标识符或主键的字段")
+    denominator=fields.get(plan.get('denominator_field_id'))
+    if operation=='RATIO_SUM':
+        if not denominator or not measure or denominator['field_id']==measure['field_id']:
+            raise PlanningBlocked('METADATA_CANDIDATE_INCOMPLETE','比值需要当前表中的两个明确数值字段作为分子和分母')
+        for field in (measure,denominator):
+            if not re.search(r'(smallint|integer|bigint|numeric|decimal|real|double|float)',field.get('data_type','').lower()):
+                raise PlanningBlocked('METADATA_CANDIDATE_INVALID','比值的分子和分母必须是数值字段')
+        answers_text=' '.join(str(a.get('answer') or '') for a in answers)
+        if not re.search(r'÷|/|除以|比值|比例',answers_text):
+            raise PlanningBlocked('METADATA_CANDIDATE_INCOMPLETE','请先明确确认分子除以分母的计算口径')
+        units=[field.get('unit') for field in (measure,denominator)]
+        known=all(isinstance(u,dict) and u.get('kind')!='UNKNOWN' and u.get('authority') in {'CONFIRMED','SYNTHETIC_ONLY'} for u in units)
+        if known and any(units[0].get(key)!=units[1].get(key) for key in ('kind','code','currency','scale')):
+            raise PlanningBlocked('METADATA_CANDIDATE_INCOMPLETE','分子和分母单位不一致，不能直接计算比值')
+        if not known and not re.search(r'同一单位|单位一致|相同单位|均为|同币种',answers_text):
+            raise PlanningBlocked('METADATA_CANDIDATE_INCOMPLETE','请确认分子和分母采用相同单位或币种')
+        unit={'kind':'RATIO','code':'ratio','currency':None,'scale':None,'authority':'SYNTHETIC_ONLY'}
+    elif operation in {"SUM","AVG"}:
+        if not re.search(r"(smallint|integer|bigint|numeric|decimal|real|double|float)",str(measure.get("data_type","")).lower()):
+            raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","求和或平均值需要数值类型字段")
+        unit=measure.get("unit")
+        unit_known=isinstance(unit,dict) and unit.get("kind") not in {None,"UNKNOWN"} and unit.get("authority") in {"CONFIRMED","SYNTHETIC_ONLY"}
+        if not unit_known:
+            answer_text=" ".join(str(a.get("answer") or "") for a in answers if isinstance(a,dict))
+            unit_label=str(plan.get("unit_label") or "").strip()
+            if not unit_label or unit_label.casefold() not in answer_text.casefold():
+                raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","该度量字段没有权威单位；请明确本次技术验证采用的单位")
+            unit={"kind":"UNKNOWN","code":unit_label,"currency":None,"scale":None,"authority":"UNKNOWN"}
+        elif unit.get("kind")=="CURRENCY" and not unit.get("currency"):
+            raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","金额字段缺少币种定义，请先补充并确认")
+    else:
+        unit={"kind":"COUNT","code":"count","currency":None,"scale":None,"authority":"SYNTHETIC_ONLY"}
+    time_id=plan.get("time_field_id")
+    time_field=fields.get(time_id) if time_id else None
+    if not time_field or not re.search(r"(date|time)",str(time_field.get("data_type","")).lower()):
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","请从目录中确认可用于统计时间的日期/时间字段")
+    role=str(time_field.get("semantic_role") or "UNKNOWN")
+    if role not in {"EVENT_TIME","BUSINESS_DATE","SNAPSHOT_DATE","PROCESSING_TIME"}:
+        explicit_time=' '.join(str(a.get('answer') or '') for a in answers)
+        if time_field['name'] not in explicit_time or not re.search(r'时间|日期|time|date',explicit_time,re.I):
+            raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE",f"字段 {time_field['name']}（{time_field.get('name_zh') or '未维护中文名'}）尚未维护时间角色，请明确确认本次按此字段表示哪种业务时间")
+    dimension_ids=plan.get("dimension_field_ids") or []
+    requested_dimensions=intent.get("dimension_terms") or []
+    if len(dimension_ids)>1 or len(dimension_ids)!=len(set(requested_dimensions)):
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","候选分组字段与用户请求的分组数量不一致")
+    dimension_fields=[]
+    for field_id in dimension_ids:
+        field=fields.get(field_id)
+        if not field:
+            raise PlanningBlocked("METADATA_CANDIDATE_INVALID","候选分组字段不在所选目录表中")
+        dimension_fields.append(field)
+    plan_filters=plan.get("filters") or []
+    requested_filters=intent.get("filters") or []
+    if len(plan_filters)!=len(requested_filters):
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","目录候选没有完整保留用户筛选条件")
+    filters=[]
+    remaining=list(requested_filters)
+    for item in plan_filters:
+        field=fields.get(item.get("field_id")) if isinstance(item,dict) else None
+        if not field or item.get("operator")!="=" or not isinstance(item.get("value"),str):
+            raise PlanningBlocked("METADATA_CANDIDATE_INVALID","目录候选筛选条件不符合受控字段契约")
+        labels={field['field_id'],field['name'],field.get('name_zh'),*field.get('aliases',[])}
+        match=next((f for f in remaining if str(f.get("value"))==item["value"] and f.get("operator") in {"=","eq","equals"}
+            and (f.get('field') in labels or (re.search('类目|类别|品类',str(f.get('field'))) and re.search('类目|类别|品类|category',str(field))))),None)
+        if not match:
+            raise PlanningBlocked("METADATA_CANDIDATE_INVALID","目录候选包含原问题未提出的筛选值")
+        remaining.remove(match)
+        filters.append({"field":field,"operator":"=","value":item["value"]})
+    name=str(plan.get("name") or "").strip()
+    definition=str(plan.get("definition") or "").strip()
+    if not name or len(name)>120 or not definition or len(definition)>500:
+        raise PlanningBlocked("METADATA_CANDIDATE_INCOMPLETE","候选口径需要明确的名称和业务解释")
+    snapshot_ref={"catalog_snapshot_id":table["catalog_snapshot_id"],"datasource_id":table["datasource_id"],"dataset_id":table["dataset_id"]}
+    candidate={"schema_version":"metadata-query-candidate/1.0.0","candidate_id":new_id("candidate"),
+        "scope":"local_validation","name":name,"definition":definition,"operation":operation,
+        "metric_field":measure,"denominator_field":denominator if operation=='RATIO_SUM' else None,"time_field":time_field,"dimension_fields":dimension_fields,
+        "filters":filters,"dataset_ref":snapshot_ref,"dataset_label":table["table_label"],
+        "datasource_name":table.get("datasource_name",""),"logical_locator":table["logical_locator"],
+        "namespace":table["namespace"],"physical_name":table["physical_name"],
+        "physical_source":table["namespace"]+"."+table["physical_name"],
+        "schema_fingerprint":table["schema_fingerprint"],"catalog_snapshot_hash":table["catalog_snapshot_hash"],
+        "release_id":discovery["release_id"],"release_hash":discovery["release_hash"],
+        "index_snapshot_id":discovery["index_snapshot_id"],"index_snapshot_hash":discovery["index_snapshot_hash"],
+        "metadata_context_hash":supplied_hash,"intent_frame_hash":canonical_hash(intent),
+        "time_range":{"start":start,"end_exclusive":end},"time_periods":periods,"unit":unit,
+        "time_role_source":"CATALOG" if role in {"EVENT_TIME","BUSINESS_DATE","SNAPSHOT_DATE","PROCESSING_TIME"} else "USER_CLARIFICATION",
+        "unit_source":"CATALOG" if unit.get("authority") in {"CONFIRMED","SYNTHETIC_ONLY"} else "USER_CLARIFICATION",
+        "null_policy":"EXCLUDE_AND_WARN" if operation in {"SUM","AVG","RATIO_SUM"} else "NOT_APPLICABLE",
+        "grain_note":"按当前表的物理记录粒度；目录未提供业务粒度证明" if not table.get("key_constraints") else "按固定目录声明键核对，业务含义仍待Owner审核",
+        "business_approved":False,"metadata_only_source":True}
+    candidate["content_hash"]=canonical_hash(candidate)
+    return candidate
+
+
+def compile_metadata_preview(candidate, intent, bundle, run_id, requirement_id, confirmation_ref):
+    """Compile a one-table, run-local proposal. The model never supplies SQL."""
+    if candidate.get("scope")!="local_validation" or candidate.get("business_approved") is not False:
+        raise PlanningBlocked("METADATA_CANDIDATE_INVALID","仅允许本地验证的临时候选口径")
+    clean={k:v for k,v in candidate.items() if k!="content_hash"}
+    if canonical_hash(clean)!=candidate.get("content_hash") or candidate.get("intent_frame_hash")!=canonical_hash(intent):
+        raise PlanningBlocked("METADATA_CANDIDATE_STALE","候选口径或需求已变化，请重新确认")
+    if candidate.get("release_hash")!=bundle.get("release_hash") or candidate.get("index_snapshot_hash")!=bundle.get("index_snapshot_hash"):
+        raise PlanningBlocked("METADATA_CANDIDATE_STALE","候选目录不属于当前固定发布")
+    physical=candidate.get("physical_source","")
+    if not re.fullmatch(r"[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*",physical):
+        raise PlanningBlocked("PHYSICAL_MAPPING_UNKNOWN","候选来源不是已登记的物理表")
+    namespace,table_name=physical.split(".")
+    def col(field):
+        name=field.get("name","")
+        if not re.fullmatch(r"[a-z][a-z0-9_]*",name):
+            raise PlanningBlocked("PHYSICAL_MAPPING_UNKNOWN","目录字段名无效")
+        return '"b"."'+name+'"'
+    dims=candidate.get("dimension_fields",[])
+    if len(dims)>1:
+        raise PlanningBlocked("DIMENSION_COMBINATION_UNSUPPORTED","当前本地候选路径一次只支持一个目录分组字段")
+    select_items=[]
+    if dims:
+        select_items.append(col(dims[0])+" AS dimension_value")
+    operation=candidate["operation"]
+    measure=candidate.get("metric_field")
+    if operation=="COUNT_ROWS":aggregate="COUNT(*)"
+    elif operation=="COUNT_DISTINCT" and measure:aggregate="COUNT(DISTINCT "+col(measure)+")"
+    elif operation=="SUM" and measure:aggregate="SUM("+col(measure)+")"
+    elif operation=="AVG" and measure:aggregate="AVG("+col(measure)+")"
+    elif operation=="RATIO_SUM" and measure and candidate.get('denominator_field'):
+        aggregate='CAST(SUM('+col(measure)+') AS DOUBLE PRECISION) / NULLIF(SUM('+col(candidate['denominator_field'])+'), 0)'
+    else:raise PlanningBlocked("METADATA_CANDIDATE_INVALID","候选计算方式与度量字段不一致")
+    select_items.append(aggregate+" AS metric_value")
+    time_field=candidate.get("time_field") or {}
+    time_column=col(time_field)
+    where=[time_column+" >= :start_date",time_column+" < :end_date"]
+    params={"start_date":candidate["time_range"]["start"],"end_date":candidate["time_range"]["end_exclusive"]}
+    for index,item in enumerate(candidate.get("filters",[])):
+        where.append(col(item["field"])+" = :filter_"+str(index))
+        params["filter_"+str(index)]=item["value"]
+    observation_where=list(where)
+    if operation in {"SUM","AVG","RATIO_SUM"}:
+        where.append(col(measure)+" IS NOT NULL")
+        if operation=='RATIO_SUM':
+            where.append(col(candidate['denominator_field'])+' IS NOT NULL')
+    sql="SELECT "+", ".join(select_items)+' FROM "'+namespace+'"."'+table_name+'" AS b WHERE '+" AND ".join(where)
+    if dims:
+        sql+=" GROUP BY "+col(dims[0])+" ORDER BY dimension_value NULLS LAST"
+    periods=candidate.get('time_periods') or [candidate['time_range']]
+    period_observations=[]
+    if len(periods)>1:
+        parts=[]; params={k:v for k,v in params.items() if k not in {'start_date','end_date'}}
+        params.update(start_date=min(p['start'] for p in periods),end_date=max(p['end_exclusive'] for p in periods))
+        for index,period in enumerate(periods):
+            params.update({f'period_{index}_start':period['start'],f'period_{index}_end':period['end_exclusive'],f'period_{index}_label':period.get('label') or f'时间段{index+1}'})
+            predicates=[part.replace(':start_date',f':period_{index}_start').replace(':end_date',f':period_{index}_end') for part in where]
+            # Empty aggregate rows must not turn into zero-valued periods.
+            part='SELECT '+str(index)+' AS period_order, :period_'+str(index)+'_label AS period_label, '+', '.join(select_items)+' FROM "'+namespace+'"."'+table_name+'" AS b WHERE '+' AND '.join(predicates)
+            if dims:part+=' GROUP BY '+col(dims[0])
+            part+=' HAVING COUNT(*) > 0'
+            parts.append(part)
+            observed_where=[part.replace(':start_date',f':period_{index}_start').replace(':end_date',f':period_{index}_end') for part in observation_where]
+            observed_measure=col(measure) if measure else '*'
+            if operation=='RATIO_SUM':observed_measure='CASE WHEN '+col(candidate['denominator_field'])+' IS NOT NULL THEN '+col(measure)+' END'
+            period_observations.append('SELECT COUNT(*) AS source_rows, COUNT('+observed_measure+') AS valid_measure_rows FROM "'+namespace+'"."'+table_name+'" AS b WHERE '+' AND '.join(observed_where))
+        output=['period_label']+(['dimension_value'] if dims else [])+['metric_value']
+        measures=(intent.get('analysis') or {}).get('measures',[])
+        partition='PARTITION BY dimension_value' if dims else ''
+        base='MAX(CASE WHEN period_order = 0 THEN metric_value END) OVER ('+partition+')'
+        if 'ABSOLUTE_CHANGE' in measures:output.append('metric_value - '+base+' AS absolute_change')
+        if 'GROWTH_RATE' in measures:output.append('(metric_value - '+base+') / NULLIF(CAST('+base+' AS DOUBLE PRECISION), 0) AS growth_rate')
+        sql='WITH period_values AS ('+' UNION ALL '.join(parts)+') SELECT '+', '.join(output)+' FROM period_values ORDER BY period_order'+(', dimension_value NULLS LAST' if dims else '')
+    tree=sqlglot.parse_one(sql,read="postgres")
+    ast_template=tree.sql(dialect="postgres")
+    sql_text=re.sub(r":([a-z_][a-z0-9_]*)",r"%(\1)s",ast_template)
+    read_query(ast_template)
+    dimensions=[{"name":"dimension_value","label":dims[0].get("name_zh") or dims[0]["name"],
+        "field_ref":{**candidate["dataset_ref"],"field_id":dims[0]["field_id"]}}] if dims else []
+    result_kind="COUNT" if operation in {"COUNT_ROWS","COUNT_DISTINCT"} else "NUMBER"
+    frame={"frame_id":new_id("frame"),"revision":1,"run_id":run_id,"requirement_id":requirement_id,
+        "intent_frame_hash":canonical_hash(intent),"bundle_id":bundle["bundle_id"],"bundle_content_hash":canonical_hash(bundle),
+        "metric_confirmation_ref":confirmation_ref,"metric_ref":None,"binding_ref":None,"dimension_refs":[],
+        "metadata_candidate_ref":{"candidate_id":candidate["candidate_id"],"content_hash":candidate["content_hash"]},
+        "metadata_candidate":copy.deepcopy(candidate),
+        "catalog_snapshot_ref":candidate["dataset_ref"],"catalog_snapshot_hash":candidate["catalog_snapshot_hash"],
+        "physical_refs":[{"kind":"DATASET","target_ref":candidate["dataset_ref"]}]+
+            [{"kind":"FIELD","target_ref":{**candidate["dataset_ref"],"field_id":field["field_id"]}}
+                for field in ([candidate.get("metric_field"),candidate.get('denominator_field'),time_field]+dims+[item["field"] for item in candidate.get("filters",[])]) if field],
+        "release_id":bundle["release_id"],"release_hash":bundle["release_hash"],
+        "index_snapshot_id":bundle["index_snapshot_id"],"index_snapshot_hash":bundle["index_snapshot_hash"],
+        "resolved_parameters":params,"datasource_id":int(candidate["dataset_ref"]["datasource_id"]),
+        "scope":"local_validation","metric_id":"metadata:"+candidate["candidate_id"],"unit":candidate["unit"],
+        "time_expression":"b."+time_field["name"],"time_physical_source":candidate["physical_source"],
+        "time_field_name":time_field["name"],"execution_authority":"MetadataCandidate",
+        "metadata_candidate_hash":candidate["content_hash"],"metadata_context_hash":candidate["metadata_context_hash"],
+        "source_object":candidate["logical_locator"],"physical_source":candidate["physical_source"],
+        "dimension_ids":[],"dimension_field_refs":dimensions,"result_kind":result_kind,
+        "result_shape":["dimension_value","metric_value"] if dims else ["metric_value"],
+        "result_column_metadata":dimensions+[{"name":"metric_value","label":candidate["name"],
+            "unit":candidate["unit"],"candidate_only":True}],
+        "metric_null_policy":"REJECT_ROW_AND_WARN" if operation in {"SUM","AVG","RATIO_SUM"} else "IGNORE",
+        "empty_result_policy":"NO_DATA","observation_sql":None,
+        "budget":{"statement_timeout_ms":10000,"max_rows":1000,"max_plan_rows":5000000,"max_total_cost":1000000},
+        "candidate_only":True,"business_approved":False}
+    measure_observation=col(measure) if measure else "*"
+    if operation=='RATIO_SUM':
+        measure_observation='CASE WHEN '+col(candidate['denominator_field'])+' IS NOT NULL THEN '+col(measure)+' END'
+    observation_sql="SELECT COUNT(*) AS source_rows, COUNT("+measure_observation+") AS valid_measure_rows FROM \""+namespace+"\".\""+table_name+"\" AS b WHERE "+" AND ".join(observation_where)
+    frame["observation_sql"]=re.sub(r":([a-z_][a-z0-9_]*)",r"%(\1)s",observation_sql)
+    if len(periods)>1:
+        frame['time_periods']=periods
+        frame['observation_queries']=[re.sub(r':([a-z_][a-z0-9_]*)',r'%(\1)s',q) for q in period_observations]
+        additions=[]
+        if 'ABSOLUTE_CHANGE' in measures:additions.append({'name':'absolute_change','label':'相对基期变化量'})
+        if 'GROWTH_RATE' in measures:additions.append({'name':'growth_rate','label':'相对基期变化率'})
+        frame['result_shape']=['period_label']+frame['result_shape']+[c['name'] for c in additions]
+        frame['result_column_metadata']=[{'name':'period_label','label':'时间段'}]+frame['result_column_metadata']+additions
+    frame["content_hash"]=canonical_hash(frame)
+    preview={"sql":sql_text,"sql_ast_template":ast_template,"sql_hash":canonical_hash({"sql":sql_text}),
+        "parameters":params,"parameters_hash":canonical_hash(params),"datasource_id":frame["datasource_id"],
+        "execution_mode":"local_validation","executed":False,"query_frame_hash":frame["content_hash"],
+        "sources":[physical],"compiler_version":"metadata-candidate-sql/1.0.0"}
+    return frame,preview
+
+
 SAFE_METRICS = {"order_count", "session_count", "shipment_count", "promotion_orders", "review_score"}
 DIMENSIONS = {"customer_state": "买家所在地区（省/州）", "product_category": "商品类别"}
 TIME_EVENTS = {"order_count": {"下单", "下单时间", "订单创建", "订单创建时间", "订单下单时间", "purchased_at", "order_placed", "purchase", "order_purchase"},
@@ -78,8 +341,6 @@ def compile_preview(contract, intent, bundle, run_id, requirement_id, confirmati
             raise PlanningBlocked("TIME_INTERVAL_UNSUPPORTED", "当前日期范围执行器要求明确的左闭右开区间，不能忽略时间边界规则")
         if policy.get("history_policy") not in {"CURRENT", "IMMUTABLE"}:
             raise PlanningBlocked("HISTORY_POLICY_UNSUPPORTED", "历史时点归属策略未知或尚未实现，请明确使用当前源库快照的统计策略")
-        if policy.get("timezone") not in {None, "SOURCE", "SOURCE_TIMESTAMP"}:
-            raise PlanningBlocked("TIMEZONE_MAPPING_UNSUPPORTED", "指标要求指定时区，但当前源时间尚未完成该时区解释和转换的验收")
     time_event = intent.get("requested_time_event") or intent.get("time_event")
     accepted_events = set(contract.get("time_event_aliases", [])) if contract.get("authority") == "AssetRevision+CatalogSnapshot" else TIME_EVENTS.get(metric_id, set())
     if time_event and time_event not in accepted_events:
@@ -93,8 +354,6 @@ def compile_preview(contract, intent, bundle, run_id, requirement_id, confirmati
         raise PlanningBlocked("TIME_REQUIRED", "请明确查询起止日期")
     if start_date >= end_date:
         raise PlanningBlocked("TIME_INVALID", "结束日期必须晚于开始日期")
-    if intent.get("timezone") not in {"SOURCE", "source", "源库时间", "SOURCE_TIMESTAMP"}:
-        raise PlanningBlocked("TIMEZONE_UNCONFIRMED", "本地源库时间未维护时区；请确认使用源库原始时间且不做时区转换")
     if intent.get("negative_terms"):
         raise PlanningBlocked("NEGATIVE_CONSTRAINT_REVIEW", "问题含排除或否定约束，需要先确认其精确口径")
     dims = intent.get("dimension_ids", [])
@@ -209,10 +468,31 @@ def compile_preview(contract, intent, bundle, run_id, requirement_id, confirmati
 
 
 def source_check(db, wid, frame, preview, explain=True):
-    from .semantic import get_execution_contract
-    current_contract = get_execution_contract(db, wid, frame["binding_ref"])
-    if current_contract.get("binding_content_hash") != frame.get("binding_content_hash") or current_contract.get("source_contract_hash") != frame.get("source_contract_hash"):
-        raise PlanningBlocked("SEMANTIC_REVISION_STALE", "语义映射或来源已变化，请重新召回确认")
+    if frame.get("execution_authority")=="MetadataCandidate":
+        from .semantic import resolve_physical, sha
+        from .semantic_models import SemanticSnapshot
+        candidate=frame.get("metadata_candidate") or {}
+        candidate_clean={k:v for k,v in candidate.items() if k!="content_hash"}
+        if canonical_hash(candidate_clean)!=candidate.get("content_hash") or candidate.get("content_hash")!=frame.get("metadata_candidate_hash"):
+            raise PlanningBlocked("METADATA_CANDIDATE_STALE","临时候选口径校验不一致，请重新确认")
+        if candidate.get("release_hash")!=frame.get("release_hash") or candidate.get("index_snapshot_hash")!=frame.get("index_snapshot_hash"):
+            raise PlanningBlocked("METADATA_CANDIDATE_STALE","候选口径与固定发布版本不一致")
+        snapshot_ref=candidate.get("dataset_ref") or {}
+        snapshot=db.get(SemanticSnapshot,snapshot_ref.get("catalog_snapshot_id"))
+        if not snapshot or snapshot.workspace_id!=wid or snapshot.content_hash!=candidate.get("catalog_snapshot_hash") or sha(snapshot.content)!=snapshot.content_hash:
+            raise PlanningBlocked("PINNED_CATALOG_STALE","候选目录快照不可验证，请重新检索")
+        dataset=resolve_physical(db,wid,snapshot_ref)
+        if dataset.get("schema_fingerprint")!=candidate.get("schema_fingerprint") or dataset.get("logical_locator")!=candidate.get("logical_locator"):
+            raise PlanningBlocked("PINNED_CATALOG_STALE","候选表结构与固定目录不一致")
+        allowed={field["field_id"] for field in dataset.get("fields",[])}
+        if any(ref.get("target_ref",{}).get("field_id") not in allowed for ref in frame.get("physical_refs",[]) if ref.get("kind")=="FIELD"):
+            raise PlanningBlocked("PINNED_CATALOG_STALE","候选字段已不在固定目录快照中")
+        current_contract={"authority":"MetadataCandidate","catalog_fingerprints":{candidate["physical_source"]:candidate["schema_fingerprint"]},"join_checks":{}}
+    else:
+        from .semantic import get_execution_contract
+        current_contract = get_execution_contract(db, wid, frame["binding_ref"])
+        if current_contract.get("binding_content_hash") != frame.get("binding_content_hash") or current_contract.get("source_contract_hash") != frame.get("source_contract_hash"):
+            raise PlanningBlocked("SEMANTIC_REVISION_STALE", "语义映射或来源已变化，请重新召回确认")
     source = db.get(Datasource, frame["datasource_id"])
     if not source or source.workspace_id != wid:
         raise PlanningBlocked("SOURCE_UNAVAILABLE", "查询数据源不可用")
@@ -238,7 +518,7 @@ def source_check(db, wid, frame, preview, explain=True):
             Asset.namespace == namespace, Asset.table_name == name, Asset.state == "active"))
         if not stored or (namespace, name) not in current or stored.fingerprint != current[(namespace, name)]["fingerprint"]:
             raise PlanningBlocked("SOURCE_STALE", "目录与真实表结构不一致，请重新核验")
-        if current_contract.get("authority") == "AssetRevision+CatalogSnapshot" and current_contract["catalog_fingerprints"].get(namespace + "." + name) != stored.fingerprint:
+        if current_contract.get("authority") in {"AssetRevision+CatalogSnapshot", "MetadataCandidate"} and current_contract["catalog_fingerprints"].get(namespace + "." + name) != stored.fingerprint:
             raise PlanningBlocked("PINNED_CATALOG_STALE", "真实结构已偏离当前映射固定的目录快照，重新采集不能自动改变历史映射")
         from .pipeline_catalog import batch_gate
         # Agent currently executes as the explicitly authorized local admin;
@@ -274,7 +554,9 @@ def source_check(db, wid, frame, preview, explain=True):
         coverage = conn.execute(sql.SQL("SELECT min({}), max({}) FROM {}.{}").format(sql.Identifier(field), sql.Identifier(field), sql.Identifier(ns), sql.Identifier(name))).fetchone()
         start = date.fromisoformat(frame["resolved_parameters"]["start_date"])
         end = date.fromisoformat(frame["resolved_parameters"]["end_date"])
-        if not coverage[0] or start < coverage[0].date() or end - timedelta(days=1) > coverage[1].date():
+        coverage_start=coverage[0].date() if isinstance(coverage[0],datetime) else coverage[0]
+        coverage_end=coverage[1].date() if isinstance(coverage[1],datetime) else coverage[1]
+        if (not coverage_start or start < coverage_start or end - timedelta(days=1) > coverage_end) and frame.get('execution_authority')!='MetadataCandidate':
             raise PlanningBlocked("TIME_COVERAGE_UNKNOWN", "请求时间超出当前快照已观测的数据覆盖范围")
         plan = None
         if explain:
@@ -351,6 +633,12 @@ def verify_physical_grain(conn, frame):
 
 
 def observe_measure_rows(conn, frame, parameters):
+    if frame.get('observation_queries'):
+        periods=[]
+        for period,query in zip(frame['time_periods'],frame['observation_queries']):
+            observed=conn.execute(query,parameters).fetchone()
+            periods.append({**period,'source_rows':observed[0],'valid_measure_rows':observed[1], 'null_measure_rows':observed[0]-observed[1]})
+        return {**{key:sum(p[key] for p in periods) for key in ('source_rows','valid_measure_rows','null_measure_rows')},'periods':periods}
     if not frame.get("observation_sql"):
         return None
     observed = conn.execute(frame["observation_sql"], parameters).fetchone()
@@ -360,6 +648,12 @@ def observe_measure_rows(conn, frame, parameters):
 def apply_result_policies(frame, measure_counts, values):
     no_data = bool(measure_counts is not None and measure_counts["valid_measure_rows"] == 0 and frame.get("empty_result_policy") == "NO_DATA")
     warnings = []
+    if frame.get('metadata_candidate',{}).get('operation')=='RATIO_SUM':
+        metric_index=frame['result_shape'].index('metric_value')
+        if any(row[metric_index] is None for row in values):
+            warnings.append({'code':'ZERO_DENOMINATOR','message':'部分比值的分母合计为零或为空，结果保留为空值'})
+    if measure_counts and any(p['valid_measure_rows']==0 for p in measure_counts.get('periods',[])):
+        warnings.append({'code':'PERIOD_NO_DATA','message':'部分时间段没有有效记录，不补零，也不更换基期'})
     if measure_counts and measure_counts["null_measure_rows"] and frame.get("metric_null_policy") == "REJECT_ROW_AND_WARN":
         warnings.append({"code": "NULL_MEASURE_ROWS_REJECTED", "message": "已按指标规则排除统计字段为空的记录", "row_count": measure_counts["null_measure_rows"]})
     return ([] if no_data else values), no_data, warnings
