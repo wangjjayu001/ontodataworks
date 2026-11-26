@@ -5,7 +5,7 @@
       "id": "platform",
       "title": "平台内核与身份权限",
       "summary": "负责会话、工作空间、成员、审计及共享 API 装配；其他模块使用真实身份和空间边界。",
-      "paths": ["backend/app/main.py", "backend/app/db.py", "backend/app/security.py", "backend/app/observability.py", "frontend/src/main.jsx", "frontend/src/navigation.js", "frontend/src/styles.css", "frontend/public/*"],
+      "paths": ["backend/app/main.py", "backend/app/db.py", "backend/app/security.py", "backend/app/observability.py", "frontend/src/main.jsx", "frontend/src/navigation.js", "frontend/src/styles.css", "frontend/public/*", "frontend/src/WorkspaceUi.jsx"],
       "tests": ["scripts/test_execution_policies.py"],
       "contracts": "公开 API、cookie/CSRF、workspace/actor、共享模型变化需标注所有受影响模块。"
     },
@@ -13,8 +13,8 @@
       "id": "catalog",
       "title": "数据源、目录与血缘",
       "summary": "负责连接、元数据采集、物理结构指纹、中文释义和来源；与语义权威分开。",
-      "paths": ["backend/app/warehouse.py", "backend/app/pipeline_catalog.py", "backend/app/main.py", "backend/app/db.py", "frontend/src/main.jsx"],
-      "tests": ["scripts/validate_drift_and_readonly.py", "scripts/validate_chinese_metadata.py"],
+      "paths": ["backend/app/warehouse.py", "backend/app/pipeline_catalog.py", "backend/app/main.py", "backend/app/db.py", "frontend/src/main.jsx", "backend/app/catalog_lineage.py", "frontend/src/DataMap.jsx", "frontend/src/CatalogLineage.jsx", "frontend/src/catalogLineageModel.js", "frontend/src/data-map.css"],
+      "tests": ["scripts/validate_drift_and_readonly.py", "scripts/validate_chinese_metadata.py", "scripts/test_catalog_lineage.py", "frontend/tests/catalog-lineage.test.mjs", "scripts/validate_catalog_lineage_live.py"],
       "contracts": "CatalogSnapshot / FieldRef、来源证据及物理指纹由本模块提供；变更需联合 semantic 评审。"
     },
     {
@@ -45,8 +45,8 @@
       "id": "agent",
       "title": "问数 Agent 与模型运行",
       "summary": "负责对话、逐需求项状态、澄清、固定语义引用、确定性规划、Gate、单次授权、取消和模型桥接。",
-      "paths": ["backend/app/agent*.py", "backend/app/model_runtime.py", "backend/app/query_provenance.py", "frontend/src/SmartQuery.jsx", "frontend/src/Query*.jsx", "frontend/src/smart-query.css", "frontend/src/CodexModelPicker.jsx", "frontend/src/codex-models.json", "frontend/src/query*.js", "scripts/codex_bridge.py", "scripts/codex_cli_config.py", "scripts/*CodexBridge.ps1", "scripts/CODEX-RUNTIME.md"],
-      "tests": ["scripts/test_agent*.py", "scripts/test_codex_cli_config.py", "scripts/test_metadata_candidate_flow.py", "scripts/test_model_contract.py", "scripts/test_model_vocabulary.py", "frontend/tests/query*.mjs", "scripts/validate_agent_transport_live.py", "scripts/validate_model_runtime.py"],
+      "paths": ["backend/app/agent*.py", "backend/app/model_runtime.py", "backend/app/query_provenance.py", "frontend/src/SmartQuery.jsx", "frontend/src/Query*.jsx", "frontend/src/smart-query.css", "frontend/src/CodexModelPicker.jsx", "frontend/src/codex-models.json", "frontend/src/query*.js", "scripts/codex_bridge.py", "scripts/codex_cli_config.py", "scripts/*CodexBridge.ps1", "scripts/CODEX-RUNTIME.md", "frontend/src/useQueryStepScroll.js", "frontend/src/queryStepScroll.js"],
+      "tests": ["scripts/test_agent*.py", "scripts/test_codex_cli_config.py", "scripts/test_metadata_candidate_flow.py", "scripts/test_model_contract.py", "scripts/test_model_vocabulary.py", "frontend/tests/query*.mjs", "scripts/validate_agent_transport_live.py", "scripts/validate_model_runtime.py", "frontend/tests/query-step-scroll.test.mjs"],
       "contracts": "模型目录/结构化意图、Run/Requirement/QueryFrame/CAS；意图和工具变化不得扩大当前本地公开/合成验证范围。"
     },
     {

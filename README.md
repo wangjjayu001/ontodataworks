@@ -8,6 +8,8 @@
 
 本 README 专注源码部署与验证。当前基于 React 18、FastAPI、PostgreSQL；DataWorks 指能力体系参考，阿里云 DataWorks OpenAPI/SDK、MaxCompute 接口尚未接入，详见[能力映射](docs/features/dataworks-capabilities.md)。
 
+v1.2 新增数据地图表工作页、表级/字段级血缘和问数确认后的步骤定位；见[功能说明](docs/features/data-map-lineage.md)与[验收范围](docs/reports/2026-11-26-v12-data-map-lineage.md)。
+
 ## 1. 环境要求
 
 - Windows 10/11、PowerShell、Docker Desktop Linux 引擎及 Docker Compose 2.24.4+。

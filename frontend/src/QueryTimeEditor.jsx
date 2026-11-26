@@ -6,7 +6,7 @@ export function TimePeriodEditor({periods=[],comparison=false,confirmed=false,bu
  useEffect(()=>{setDrafts(periods.length?periodDrafts(periods):Array.from({length:comparison?2:1},()=>({label:'',start:'',end:''})));},[signature,comparison]);
  const answer=periodAnswer(drafts,comparison),dirty=JSON.stringify(answer)!==signature;
  function edit(index,key,value){setDrafts(current=>current.map((period,i)=>i===index?{...period,[key]:value}:period));}
- return <section className="sq-time-editor" aria-label="确认或修改时间段">
+ return <section className="sq-time-editor" aria-label="确认或修改时间段" data-query-step="time">
   <div className="sq-time-heading"><strong>{comparison?'确认对比时间段':'确认统计时间'}</strong><span>{confirmed&&!dirty?'已确认':'请核对日期'}</span></div>
   <p>{comparison?'各时间段分别保留，第一个为基期。可修改日期、调整基期或添加时间段。':'已识别的时间可直接确认，也可修改为任意起止日期。'}</p>
   <div className="sq-period-list">{drafts.map((period,index)=><fieldset key={index} disabled={busy}>

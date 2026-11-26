@@ -21,6 +21,8 @@ PR scope：`agent`；GitHub 标签：`module:agent`。
 - `scripts/codex_cli_config.py`
 - `scripts/*CodexBridge.ps1`
 - `scripts/CODEX-RUNTIME.md`
+- `frontend/src/useQueryStepScroll.js`
+- `frontend/src/queryStepScroll.js`
 
 ## 现有验证入口
 
@@ -32,6 +34,7 @@ PR scope：`agent`；GitHub 标签：`module:agent`。
 - `frontend/tests/query*.mjs`
 - `scripts/validate_agent_transport_live.py`
 - `scripts/validate_model_runtime.py`
+- `frontend/tests/query-step-scroll.test.mjs`
 
 ## 接口与评审边界
 
